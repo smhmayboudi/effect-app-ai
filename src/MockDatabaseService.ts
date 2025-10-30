@@ -9,6 +9,7 @@ export const User = Schema.Struct({
   role: Schema.String,
   department: Schema.String
 })
+export type User = typeof User.Type
 
 export const Order = Schema.Struct({
   id: Schema.Number,
@@ -18,6 +19,7 @@ export const Order = Schema.Struct({
   status: Schema.String,
   created_at: Schema.Date
 })
+export type Order = typeof Order.Type
 
 export const Product = Schema.Struct({
   id: Schema.Number,
@@ -26,9 +28,10 @@ export const Product = Schema.Struct({
   price: Schema.Number,
   description: Schema.String
 })
+export type Product = typeof Product.Type
 
 // Mock data
-const mockUsers = [
+const mockUsers: Array<User> = [
   { id: 1, name: "John Doe", email: "john@company.com", role: "admin", department: "IT" },
   { id: 2, name: "Jane Smith", email: "jane@company.com", role: "user", department: "Sales" },
   { id: 3, name: "Bob Johnson", email: "bob@company.com", role: "manager", department: "Marketing" },
@@ -36,7 +39,7 @@ const mockUsers = [
   { id: 5, name: "Charlie Wilson", email: "charlie@company.com", role: "user", department: "Sales" }
 ]
 
-const mockOrders = [
+const mockOrders: Array<Order> = [
   { id: 1, customer_id: 2, description: "Enterprise Software License", amount: 50000, status: "completed", created_at: new Date('2024-01-15') },
   { id: 2, customer_id: 5, description: "Sales Training Package", amount: 15000, status: "pending", created_at: new Date('2024-01-20') },
   { id: 3, customer_id: 3, description: "Marketing Campaign Suite", amount: 25000, status: "completed", created_at: new Date('2024-01-10') },
@@ -44,7 +47,7 @@ const mockOrders = [
   { id: 5, customer_id: 2, description: "Additional User Licenses", amount: 5000, status: "completed", created_at: new Date('2024-01-18') }
 ]
 
-const mockProducts = [
+const mockProducts: Array<Product> = [
   { id: 1, name: "Enterprise Suite", category: "software", price: 50000, description: "Comprehensive business management software" },
   { id: 2, name: "Sales Pro", category: "software", price: 15000, description: "Sales automation and CRM tool" },
   { id: 3, name: "Marketing Hub", category: "software", price: 25000, description: "Digital marketing platform" },
@@ -54,9 +57,9 @@ const mockProducts = [
 
 // Database Service Interface
 interface DatabaseService {
-  getUsers: (filters?: { ids?: string[]; role?: string; department?: string }) => Effect.Effect<Array<typeof User.Type>, Error>
-  getOrders: (filters?: { ids?: string[]; customer_id?: number; status?: string }) => Effect.Effect<Array<typeof Order.Type>, Error>
-  getProducts: (filters?: { ids?: string[]; category?: string }) => Effect.Effect<Array<typeof Product.Type>, Error>
+  getUsers: (filters?: { ids?: string[]; role?: string; department?: string }) => Effect.Effect<Array<User>, Error>
+  getOrders: (filters?: { ids?: string[]; customer_id?: number; status?: string }) => Effect.Effect<Array<Order>, Error>
+  getProducts: (filters?: { ids?: string[]; category?: string }) => Effect.Effect<Array<Product>, Error>
   getUserStats: (userId: number) => Effect.Effect<{ total_orders: number; total_spent: number }, Error>
 }
 
