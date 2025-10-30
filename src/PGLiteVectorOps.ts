@@ -5,34 +5,58 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
   effect: Effect.gen(function*() {
     const pglite = yield* PGLiteVectorService
 
-    const storeEmbedding = (data: {
-      id: string
-      content: string
-      embedding: Array<number>
-      type: "order" | "product" | "user"
-      entity_id: string
-      metadata?: Record<string, any>
+    const hybridSearch = (query: string, queryEmbedding: Array<number>, options?: {
+      limit?: number
+      similarityThreshold?: number
+      filters?: { type?: string }
     }) =>
-      Effect.tryPromise(() =>
-        pglite.db.query(
-          `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (id) DO UPDATE SET
-              content = EXCLUDED.content,
-              embedding = EXCLUDED.embedding,
-              metadata = EXCLUDED.metadata,
-              created_at = NOW()
-          `,
-          [
-            data.id,
-            data.content,
-            data.embedding,
-            data.type,
-            data.entity_id,
-            JSON.stringify(data.metadata || {})
-          ]
+      Effect.gen(function*() {
+        const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
+
+        const params: Array<any> = [queryEmbedding, similarityThreshold]
+        const whereConditions = ["1 <= 2"]
+
+        if (filters.type) {
+          params.push(filters.type)
+          whereConditions.push(`type = $${params.length}`)
+        }
+
+        if (query) {
+          params.push(`%${query}%`)
+          whereConditions.push(`content ILIKE $${params.length}`)
+        }
+
+        params.push(limit)
+
+        const results = yield* Effect.tryPromise(() =>
+          pglite.db.query<{
+            id: string
+            content: string
+            embedding: Array<number>
+            type: "order" | "product" | "user"
+            entity_id: string
+            metadata?: Record<string, any>
+            similarity: number
+          }>(
+            `SELECT 
+                id,
+                content,
+                type,
+                entity_id,
+                metadata,
+                1 - (embedding <=> $1) as similarity
+              FROM embeddings
+              WHERE ${whereConditions.join(" AND ")}
+                AND (1 - (embedding <=> $1)) >= $2
+              ORDER BY embedding <=> $1
+              LIMIT $${params.length}
+            `,
+            params
+          )
         )
-      )
+
+        return results.rows
+      })
 
     const semanticSearch = (queryEmbedding: Array<number>, options: {
       limit?: number
@@ -87,61 +111,37 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         return results.rows
       })
 
-    const hybridSearch = (query: string, queryEmbedding: Array<number>, options?: {
-      limit?: number
-      similarityThreshold?: number
-      typeFilter?: string
+    const storeEmbedding = (data: {
+      id: string
+      content: string
+      embedding: Array<number>
+      type: "order" | "product" | "user"
+      entity_id: string
+      metadata?: Record<string, any>
     }) =>
-      Effect.gen(function*() {
-        const { limit = 10, similarityThreshold = 0.7, typeFilter } = options || {}
-
-        const params: Array<any> = [queryEmbedding, similarityThreshold]
-        const whereConditions = ["1 <= 2"]
-
-        if (typeFilter) {
-          params.push(typeFilter)
-          whereConditions.push(`type = $${params.length}`)
-        }
-
-        if (query) {
-          params.push(`%${query}%`)
-          whereConditions.push(`content ILIKE $${params.length}`)
-        }
-
-        params.push(limit)
-
-        const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<{
-            id: string
-            content: string
-            embedding: Array<number>
-            type: "order" | "product" | "user"
-            entity_id: string
-            metadata?: Record<string, any>
-            similarity: number
-          }>(
-            `SELECT 
-                id,
-                content,
-                type,
-                entity_id,
-                metadata,
-                1 - (embedding <=> $1) as similarity
-              FROM embeddings
-              WHERE ${whereConditions.join(" AND ")}
-                AND (1 - (embedding <=> $1)) >= $2
-              ORDER BY embedding <=> $1
-              LIMIT $${params.length}
-            `,
-            params
-          )
+      Effect.tryPromise(() =>
+        pglite.db.query(
+          `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (id) DO UPDATE SET
+              content = EXCLUDED.content,
+              embedding = EXCLUDED.embedding,
+              metadata = EXCLUDED.metadata,
+              created_at = NOW()
+          `,
+          [
+            data.id,
+            data.content,
+            data.embedding,
+            data.type,
+            data.entity_id,
+            JSON.stringify(data.metadata || {})
+          ]
         )
-
-        return results.rows
-      })
+      )
 
     // Advanced vector operations
-    const batchStoreEmbeddings = (
+    const storeEmbeddingBatch = (
       items: Array<{
         id: string
         content: string
@@ -177,10 +177,10 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       )
 
     return {
-      batchStoreEmbeddings,
       hybridSearch,
       semanticSearch,
-      storeEmbedding
+      storeEmbedding,
+      storeEmbeddingBatch
     }
   })
 }) {}

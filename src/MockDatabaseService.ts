@@ -40,28 +40,61 @@ const mockUsers: Array<User> = [
 ]
 
 const mockOrders: Array<Order> = [
-  { id: 1, customer_id: 2, description: "Enterprise Software License", amount: 50000, status: "completed", created_at: new Date('2024-01-15') },
-  { id: 2, customer_id: 5, description: "Sales Training Package", amount: 15000, status: "pending", created_at: new Date('2024-01-20') },
-  { id: 3, customer_id: 3, description: "Marketing Campaign Suite", amount: 25000, status: "completed", created_at: new Date('2024-01-10') },
-  { id: 4, customer_id: 1, description: "IT Infrastructure Upgrade", amount: 75000, status: "processing", created_at: new Date('2024-01-25') },
-  { id: 5, customer_id: 2, description: "Additional User Licenses", amount: 5000, status: "completed", created_at: new Date('2024-01-18') }
+  {
+    id: 1,
+    customer_id: 2,
+    description: "Enterprise Software License",
+    amount: 50000,
+    status: "completed",
+    created_at: new Date("2024-01-15")
+  },
+  {
+    id: 2,
+    customer_id: 5,
+    description: "Sales Training Package",
+    amount: 15000,
+    status: "pending",
+    created_at: new Date("2024-01-20")
+  },
+  {
+    id: 3,
+    customer_id: 3,
+    description: "Marketing Campaign Suite",
+    amount: 25000,
+    status: "completed",
+    created_at: new Date("2024-01-10")
+  },
+  {
+    id: 4,
+    customer_id: 1,
+    description: "IT Infrastructure Upgrade",
+    amount: 75000,
+    status: "processing",
+    created_at: new Date("2024-01-25")
+  },
+  {
+    id: 5,
+    customer_id: 2,
+    description: "Additional User Licenses",
+    amount: 5000,
+    status: "completed",
+    created_at: new Date("2024-01-18")
+  }
 ]
 
 const mockProducts: Array<Product> = [
-  { id: 1, name: "Enterprise Suite", category: "software", price: 50000, description: "Comprehensive business management software" },
+  {
+    id: 1,
+    name: "Enterprise Suite",
+    category: "software",
+    price: 50000,
+    description: "Comprehensive business management software"
+  },
   { id: 2, name: "Sales Pro", category: "software", price: 15000, description: "Sales automation and CRM tool" },
   { id: 3, name: "Marketing Hub", category: "software", price: 25000, description: "Digital marketing platform" },
   { id: 4, name: "IT Manager", category: "software", price: 30000, description: "IT infrastructure management" },
   { id: 5, name: "Basic Plan", category: "subscription", price: 5000, description: "Entry-level business tools" }
 ]
-
-// Database Service Interface
-interface DatabaseService {
-  getUsers: (filters?: { ids?: string[]; role?: string; department?: string }) => Effect.Effect<Array<User>, Error>
-  getOrders: (filters?: { ids?: string[]; customer_id?: number; status?: string }) => Effect.Effect<Array<Order>, Error>
-  getProducts: (filters?: { ids?: string[]; category?: string }) => Effect.Effect<Array<Product>, Error>
-  getUserStats: (userId: number) => Effect.Effect<{ total_orders: number; total_spent: number }, Error>
-}
 
 // Mock Database Service Implementation
 export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("DatabaseService", {
@@ -142,5 +175,5 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
 
         return { total_orders, total_spent }
       })
-  } as DatabaseService)
+  })
 }) {}

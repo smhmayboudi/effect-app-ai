@@ -1,6 +1,6 @@
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
 import { Effect, Schedule } from "effect"
-import { MockDatabaseService } from "./MockDatabaseService.js"
+import { MockDatabaseService, type Order, type Product, type User } from "./MockDatabaseService.js"
 import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
 import { PGLiteVectorService } from "./PGLiteVectorService.js"
 
@@ -16,13 +16,13 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
         const questionEmbedding = yield* embeddingModel.embed(question)
 
         // Step 2: Semantic search in PGLite
-        const ietQ = inferEntityType(question)
+        const inferEntityTypeFromQuestion = inferEntityType(question)
         const relevantContext = yield* vectorOps.semanticSearch(
           questionEmbedding,
           {
             limit: 5,
             similarityThreshold: 0.8,
-            filters: { ...(ietQ ? { type: ietQ } : {}) }
+            filters: { ...(inferEntityTypeFromQuestion ? { type: inferEntityTypeFromQuestion } : {}) }
           }
         )
 
@@ -92,19 +92,31 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
         return data
       })
 
-    const generateAnswer = (question: string, context: any[], structuredData: any) =>
+    const generateAnswer = (
+      question: string,
+      context: Array<{
+        id: string
+        content: string
+        embedding: Array<number>
+        type: "order" | "product" | "user"
+        entity_id: string
+        metadata?: Record<string, any>
+        similarity: number
+      }>,
+      structuredData: Order | Product | User
+    ) =>
       Effect.gen(function*() {
         const response = yield* LanguageModel.generateText({
-          prompt:
-            `You are a helpful business assistant. Use the semantic context and structured data to answer the question accurately.
+          prompt: `
+You are a helpful business assistant. Use the semantic context and structured data to answer the question accurately.
 
 SEMANTIC CONTEXT (from vector search): ${
-              context.length > 0
-                ? context.map((ctx) => `- ${ctx.content} (similarity: ${(ctx.similarity * 100).toFixed(1)}%)`).join(
-                  "\n"
-                )
-                : "No relevant context found from semantic search."
-            }
+            context.length > 0
+              ? context.map((ctx) => `- ${ctx.content} (similarity: ${(ctx.similarity * 100).toFixed(1)}%)`).join(
+                "\n"
+              )
+              : "No relevant context found from semantic search."
+          }
 
 STRUCTURED DATA (from database):
 ${JSON.stringify(structuredData, null, 2)}
@@ -149,7 +161,7 @@ Question: ${question}`
         )
 
         // Batch insert into PGLite
-        yield* vectorOps.batchStoreEmbeddings([
+        yield* vectorOps.storeEmbeddingBatch([
           ...usersData,
           ...ordersData,
           ...productsData
@@ -262,8 +274,12 @@ Question: ${question}`
     const generateQueryVariations = (question: string) =>
       Effect.gen(function*() {
         const response = yield* LanguageModel.generateText({
-          prompt:
-            `Generate 3 different variations of the user's question that might help find relevant information in a database. Return as a JSON array of strings. Original question: "${question}"\n\nGenerate 3 search variations:`
+          prompt: `
+Generate 3 different variations of the user's question that might help find relevant information in a database.
+Return as a JSON array of strings.
+
+Question: ${question}
+`
         })
 
         return yield* Effect.try(() => JSON.parse(response.text) as Array<string>).pipe(
@@ -275,11 +291,14 @@ Question: ${question}`
     const getQuestionAnalysis = (question: string) =>
       Effect.gen(function*() {
         const response = yield* LanguageModel.generateText({
-          prompt: `Analyze the business question and determine:
-          1. What entities are mentioned (users, orders, products)
-          2. What filters/conditions are needed
-          3. What type of answer is expected
-          Return as JSON format. question: ${question}`
+          prompt: `
+Analyze the business question and determine:
+1. What entities are mentioned (users, orders, products)
+2. What filters/conditions are needed
+3. What type of answer is expected
+Return as JSON format.
+
+Question: ${question}`
         })
 
         return Effect.try(() => JSON.parse(response.text))
@@ -293,13 +312,13 @@ Question: ${question}`
 
     return {
       answerQuestion,
-      syncDataToVectorStore,
-      semanticSearch: vectorOps.semanticSearch,
-      hybridSearch: vectorOps.hybridSearch,
+      clearVectorStore,
       enhancedSemanticSearch,
       generateBatchEmbeddings,
       getQuestionAnalysis,
-      clearVectorStore
+      hybridSearch: vectorOps.hybridSearch,
+      semanticSearch: vectorOps.semanticSearch,
+      syncDataToVectorStore
     }
   })
 }) {}
