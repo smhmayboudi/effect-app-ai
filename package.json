@@ -28,6 +28,7 @@
     "changeset-publish": "pnpm build && TEST_DIST= pnpm vitest && changeset publish"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.3.11",
     "effect": "^3.17.7"
   },
   "devDependencies": {

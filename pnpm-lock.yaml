@@ -13,6 +13,9 @@ importers:
 
   .:
     dependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.3.11
+        version: 0.3.11
       effect:
         specifier: ^3.17.7
         version: 3.18.4
@@ -280,6 +283,9 @@ packages:
     peerDependencies:
       effect: ^3.17.7
       vitest: ^3.2.0
+
+  '@electric-sql/pglite@0.3.11':
+    resolution: {integrity: sha512-FJtjnEyez8XgmgyE5Ewmx89TGVN+75ZjykFoExApRIbJBMT4dsbsuZkF/YWLuymGDfGFHDACjvENPMEqg4FoWg==}
 
   '@emnapi/core@1.6.0':
     resolution: {integrity: sha512-zq/ay+9fNIJJtJiZxdTnXS20PllcYMX3OE23ESc4HK/bdYu3cOWYVhsOhVnXALfU/uqJIxn5NBPd9z4v+SfoSg==}
@@ -2969,6 +2975,8 @@ snapshots:
     dependencies:
       effect: 3.18.4
       vitest: 3.2.4(@types/node@22.18.13)(tsx@4.20.6)
+
+  '@electric-sql/pglite@0.3.11': {}
 
   '@emnapi/core@1.6.0':
     dependencies:
