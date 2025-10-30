@@ -5,6 +5,11 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
   effect: Effect.gen(function*() {
     const pglite = yield* PGLiteVectorService
 
+    // Helper function to format embeddings for PGLite
+    const formatEmbedding = (embedding: Array<number>): string => {
+      return `[${embedding.join(",")}]`
+    }
+
     const hybridSearch = (query: string, queryEmbedding: Array<number>, options?: {
       limit?: number
       similarityThreshold?: number
@@ -13,7 +18,9 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       Effect.gen(function*() {
         const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
 
-        const params: Array<any> = [queryEmbedding, similarityThreshold]
+        // Format the query embedding for PGLite
+        const formattedEmbedding = formatEmbedding(queryEmbedding)
+        const params: Array<any> = [formattedEmbedding, similarityThreshold]
         const whereConditions = ["1 <= 2"]
 
         if (filters.type) {
@@ -32,7 +39,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           pglite.db.query<{
             id: string
             content: string
-            embedding: Array<number>
+            // embedding: Array<number>
             type: "order" | "product" | "user"
             entity_id: string
             metadata?: Record<string, any>
@@ -66,8 +73,10 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       Effect.gen(function*() {
         const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options
 
-        const whereConditions = ["1 <= 2"] // Always true base condition
-        const params: any[] = [queryEmbedding, similarityThreshold]
+        // Format the query embedding for PGLite
+        const formattedEmbedding = formatEmbedding(queryEmbedding)
+        const params: any[] = [formattedEmbedding, similarityThreshold]
+        const whereConditions = ["1 <= 2"]
 
         if (filters.type) {
           params.push(filters.type)
@@ -85,7 +94,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           pglite.db.query<{
             id: string
             content: string
-            embedding: Array<number>
+            // embedding: Array<number>
             type: "order" | "product" | "user"
             entity_id: string
             metadata?: Record<string, any>
@@ -132,7 +141,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           [
             data.id,
             data.content,
-            data.embedding,
+            formatEmbedding(data.embedding),
             data.type,
             data.entity_id,
             JSON.stringify(data.metadata || {})
@@ -168,7 +177,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           items.flatMap((item) => [
             item.id,
             item.content,
-            item.embedding,
+            formatEmbedding(item.embedding),
             item.type,
             item.entity_id,
             JSON.stringify(item.metadata || {})

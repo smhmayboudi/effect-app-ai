@@ -97,7 +97,7 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
       context: Array<{
         id: string
         content: string
-        embedding: Array<number>
+        // embedding: Array<number>
         type: "order" | "product" | "user"
         entity_id: string
         metadata?: Record<string, any>
