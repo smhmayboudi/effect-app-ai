@@ -13,6 +13,9 @@ importers:
 
   .:
     dependencies:
+      '@effect/schema':
+        specifier: ^0.75.5
+        version: 0.75.5(effect@3.18.4)
       '@electric-sql/pglite':
         specifier: ^0.3.11
         version: 0.3.11
@@ -277,6 +280,12 @@ packages:
   '@effect/language-service@0.51.0':
     resolution: {integrity: sha512-GpuKUkxRSFtjaYF+/LysLfyIqo6SX+83AiqR3ca/N3q7Swwn49hZ3oYtjctxwadwh2PJ7mYB5KnEeVn3kpADLQ==}
     hasBin: true
+
+  '@effect/schema@0.75.5':
+    resolution: {integrity: sha512-TQInulTVCuF+9EIbJpyLP6dvxbQJMphrnRqgexm/Ze39rSjfhJuufF7XvU3SxTgg3HnL7B/kpORTJbHhlE6thw==}
+    deprecated: this package has been merged into the main effect package
+    peerDependencies:
+      effect: ^3.9.2
 
   '@effect/vitest@0.25.1':
     resolution: {integrity: sha512-OMYvOU8iGed8GZXxgVBXlYtjG+jwWj5cJxFk0hOHOfTbCHXtdCMEWlXNba5zxbE7dBnW4srbnSYrP/NGGTC3qQ==}
@@ -2970,6 +2979,11 @@ snapshots:
       prettier-linter-helpers: 1.0.0
 
   '@effect/language-service@0.51.0': {}
+
+  '@effect/schema@0.75.5(effect@3.18.4)':
+    dependencies:
+      effect: 3.18.4
+      fast-check: 3.23.2
 
   '@effect/vitest@0.25.1(effect@3.18.4)(vitest@3.2.4(@types/node@22.18.13)(tsx@4.20.6))':
     dependencies:
