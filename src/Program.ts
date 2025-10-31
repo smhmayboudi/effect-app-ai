@@ -77,7 +77,7 @@ const CoreLayers = Layer.mergeAll(
   MockDatabaseService.Default,
   Layer.provide(
     PGLiteVectorOps.Default,
-    PGLiteVectorService.Default
+    PGLiteVectorService.Default.pipe(Layer.provide(Layer.scope))
   )
 )
 

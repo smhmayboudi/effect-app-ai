@@ -6,17 +6,22 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
   "PGLiteVectorService",
   {
     effect: Effect.gen(function*() {
-      // Initialize PGLite with vector support
-      const db = yield* Effect.tryPromise(() =>
-        PGlite.create({
-          dataDir: "./data",
-          extensions: { vector }
-        })
+      // Create database resource with acquireRelease
+      const db = yield* Effect.acquireRelease(
+        // Acquire: initialize PGLite with vector support
+        Effect.tryPromise(() =>
+          PGlite.create({
+            dataDir: "./data",
+            extensions: { vector }
+          })
+        ),
+        // Release: close the database connection
+        (db) => Effect.tryPromise(() => db.close()).pipe(Effect.catchTag("UnknownException", Effect.die))
       )
 
       // Initialize vector extension and create tables - execute each command separately
       yield* Effect.tryPromise(() => db.query("CREATE EXTENSION IF NOT EXISTS vector")).pipe(
-        Effect.ignore
+        Effect.catchTag("UnknownException", Effect.die)
       )
 
       yield* Effect.tryPromise(() =>
@@ -32,10 +37,9 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
           )
         `)
       ).pipe(
-        Effect.ignore
+        Effect.catchTag("UnknownException", Effect.die)
       )
 
-      // Create index separately
       yield* Effect.tryPromise(() =>
         db.query(`
           CREATE INDEX IF NOT EXISTS embedding_idx 
@@ -44,7 +48,7 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
           WITH (lists = 100)
         `)
       ).pipe(
-        Effect.ignore
+        Effect.catchTag("UnknownException", Effect.die)
       )
 
       return { db }
