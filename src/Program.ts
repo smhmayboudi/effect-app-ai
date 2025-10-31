@@ -37,10 +37,13 @@ const realEmbeddingsProgram = Effect.gen(function*() {
       console.log(`🔍 Found ${enhancedResults.length} relevant items via semantic search`)
 
       const answer = yield* qaService.answerQuestion(question)
-      console.log(`🤖 Answer: ${answer.substring(0, 200)}...\n`)
+      console.log(`🤖 Answer: ${answer}\n`)
 
       yield* Effect.sleep("1 seconds") // Rate limiting for API
     }
+
+    const recommendations = yield* qaService.advancedRecommendations(1)
+    console.log(`😇 Recommendations for customer id 1:`, recommendations)
 
     return "🎉 Real embeddings demonstration completed successfully!"
   } catch (error) {

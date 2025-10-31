@@ -14,7 +14,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
     const averageEmbedding = (ids: Array<string>) =>
       Effect.gen(function*() {
         const result = yield* Effect.tryPromise(() =>
-          pglite.db.query<{ avg_embedding: number }>(
+          pglite.db.query<{ avg_embedding: string }>(
             `
               SELECT AVG(embedding) as avg_embedding
               FROM embeddings 
@@ -24,7 +24,11 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           )
         ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
-        return result.rows
+        const resultRows = result.rows.map((row) => ({
+          avg_embedding: JSON.parse(row.avg_embedding) as Array<number>
+        }))
+
+        return resultRows
       })
 
     // Find similar items to a given item

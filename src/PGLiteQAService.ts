@@ -312,6 +312,43 @@ Question: ${question}`
         )
       })
 
+    const advancedRecommendations = (customer_id: number) =>
+      Effect.gen(function*() {
+        // Get user's recent orders
+        const userOrders = yield* db.getOrders({ customer_id })
+        const orderIds = userOrders.map((order) => `order_${order.id}`)
+
+        // if (orderIds.length === 0) {
+        //   // If no orders, use popular products
+        //   return yield* getPopularProducts()
+        // }
+
+        // Calculate user's preference profile (average of their orders)
+        const userProfiles = yield* vectorOps.averageEmbedding(orderIds)
+
+        // Find products similar to user's preference profile
+        const similarToProfile = yield* vectorOps.semanticSearch(
+          userProfiles.map((userProfile) => userProfile.avg_embedding)[0],
+          {
+            limit: 10,
+            similarityThreshold: 0.7,
+            filters: { type: "product" }
+          }
+        )
+
+        // Also find products similar to their most recent order
+        const latestOrderId = `order_${userOrders[userOrders.length - 1].id}`
+        const similarToLatest = yield* vectorOps.findSimilar(latestOrderId, 5)
+
+        // Combine and deduplicate results
+        const allRecommendations = [...similarToProfile, ...similarToLatest]
+          .filter((item, index, self) => index === self.findIndex((value) => value.entity_id === item.entity_id))
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, 10)
+
+        return allRecommendations
+      })
+
     return {
       answerQuestion,
       clearVectorStore,
@@ -320,7 +357,8 @@ Question: ${question}`
       getQuestionAnalysis,
       hybridSearch: vectorOps.hybridSearch,
       semanticSearch: vectorOps.semanticSearch,
-      syncDataToVectorStore
+      syncDataToVectorStore,
+      advancedRecommendations
     }
   })
 }) {}
