@@ -8,7 +8,7 @@ export const In = Schema.Struct({
   type: Schema.Literal("order", "product", "user"),
   entity_id: Schema.String,
   metadata: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Number }),
+    Schema.Record({ key: Schema.String, value: Schema.Any }),
     { exact: true }
   )
 })
@@ -20,7 +20,7 @@ export const Out = Schema.Struct({
   type: Schema.Literal("order", "product", "user"),
   entity_id: Schema.String,
   metadata: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Number }),
+    Schema.Record({ key: Schema.String, value: Schema.Any }),
     { exact: true }
   ),
   similarity: Schema.Number

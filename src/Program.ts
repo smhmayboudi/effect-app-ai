@@ -70,22 +70,22 @@ const LanguageModelLayer = Layer.provide(
 )
 
 // Create the AI layers
-const AiLayers = Layer.mergeAll(
+const AiLayers = Layer.merge(
   EmbeddingModelLayer,
   LanguageModelLayer
 )
 
 // Create the core application layers
-const CoreLayers = Layer.mergeAll(
+const CoreLayers = Layer.merge(
   MockDatabaseService.Default,
-  Layer.provide(
+  Layer.provideMerge(
     PGLiteVectorOps.Default,
     PGLiteVectorService.Default.pipe(Layer.provide(Layer.scope))
   )
 )
 
 // Create the complete application layer by merging all dependencies
-const AppLayer = Layer.provide(
+const AppLayer = Layer.provideMerge(
   PGLiteQAService.Default,
   CoreLayers
 )
