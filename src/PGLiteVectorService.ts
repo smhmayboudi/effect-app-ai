@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite"
+import { NodeFS } from "@electric-sql/pglite/nodefs"
 import { vector } from "@electric-sql/pglite/vector"
 import { Effect } from "effect"
 
@@ -11,21 +12,23 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
         // Acquire: initialize PGLite with vector support
         Effect.tryPromise(() =>
           PGlite.create({
-            dataDir: "./data",
-            extensions: { vector }
+            extensions: { vector },
+            fs: new NodeFS("./data/")
           })
+        ).pipe(
+          Effect.catchTag("UnknownException", Effect.die)
         ),
         // Release: close the database connection
         (db) => Effect.tryPromise(() => db.close()).pipe(Effect.catchTag("UnknownException", Effect.die))
       )
 
       // Initialize vector extension and create tables - execute each command separately
-      yield* Effect.tryPromise(() => db.query<void>("CREATE EXTENSION IF NOT EXISTS vector")).pipe(
+      yield* Effect.tryPromise(() => db.exec("CREATE EXTENSION IF NOT EXISTS vector")).pipe(
         Effect.catchTag("UnknownException", Effect.die)
       )
 
       yield* Effect.tryPromise(() =>
-        db.query<void>(`
+        db.exec(`
           CREATE TABLE IF NOT EXISTS embeddings (
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
@@ -41,7 +44,7 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
       )
 
       yield* Effect.tryPromise(() =>
-        db.query<void>(`
+        db.exec(`
           CREATE INDEX IF NOT EXISTS embedding_idx 
           ON embeddings 
           USING ivfflat (embedding vector_cosine_ops)
