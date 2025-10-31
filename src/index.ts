@@ -12,6 +12,3 @@ export * as PGLiteVectorService from "./PGLiteVectorService.js"
 
 
 export * as Program from "./Program.js"
-
-
-export * as Utils from "./Utils.js"
