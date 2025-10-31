@@ -99,7 +99,7 @@ const mockProducts: Array<Product> = [
 // Mock Database Service Implementation
 export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("DatabaseService", {
   effect: Effect.succeed({
-    getUsers: (filters?: { ids?: string[]; role?: string; department?: string }) =>
+    getUsers: (filters?: { ids?: Array<string>; role?: string; department?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
         yield* Effect.sleep("100 millis")
@@ -122,7 +122,7 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         return users
       }),
 
-    getOrders: (filters?: { ids?: string[]; customer_id?: number; status?: string }) =>
+    getOrders: (filters?: { ids?: Array<string>; customer_id?: number; status?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
         yield* Effect.sleep("150 millis")
@@ -145,7 +145,7 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         return orders
       }),
 
-    getProducts: (filters?: { ids?: string[]; category?: string }) =>
+    getProducts: (filters?: { ids?: Array<string>; category?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
         yield* Effect.sleep("120 millis")
