@@ -60,7 +60,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             params
           )
-        )
+        ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
         return results.rows
       })
@@ -115,7 +115,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             params
           )
-        )
+        ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
         return results.rows
       })
@@ -129,7 +129,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       metadata?: Record<string, any>
     }) =>
       Effect.tryPromise(() =>
-        pglite.db.query(
+        pglite.db.query<void>(
           `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
             VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (id) DO UPDATE SET
@@ -147,7 +147,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             JSON.stringify(data.metadata || {})
           ]
         )
-      )
+      ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
     // Advanced vector operations
     const storeEmbeddingBatch = (
@@ -161,7 +161,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       }>
     ) =>
       Effect.tryPromise(() =>
-        pglite.db.query(
+        pglite.db.query<void>(
           `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
             VALUES ${
             items.map((_, i) =>
@@ -183,7 +183,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             JSON.stringify(item.metadata || {})
           ])
         )
-      )
+      ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
     return {
       hybridSearch,

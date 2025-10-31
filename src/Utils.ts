@@ -8,7 +8,7 @@ export const advancedVectorOps = Effect.gen(function*() {
   // Average embedding for a set of items
   const averageEmbedding = (ids: Array<string>) =>
     Effect.tryPromise(() =>
-      pglite.db.query(
+      pglite.db.query<{ avg_embedding: number }>(
         `
           SELECT AVG(embedding) as avg_embedding
           FROM embeddings 
@@ -16,12 +16,20 @@ export const advancedVectorOps = Effect.gen(function*() {
         `,
         [ids]
       )
-    )
+    ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
   // Find similar items to a given item
   const findSimilar = (itemId: string, limit: number = 5) =>
     Effect.tryPromise(() =>
-      pglite.db.query(
+      pglite.db.query<{
+        id: string
+        content: string
+        // embedding: Array<number>
+        type: "order" | "product" | "user"
+        // entity_id: string
+        // metadata?: Record<string, any>
+        similarity: number
+      }>(
         `
           WITH target AS (
             SELECT embedding FROM embeddings WHERE id = $1
@@ -38,7 +46,7 @@ export const advancedVectorOps = Effect.gen(function*() {
         `,
         [itemId, limit]
       )
-    )
+    ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
   return { averageEmbedding, findSimilar }
 })

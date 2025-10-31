@@ -20,12 +20,12 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
       )
 
       // Initialize vector extension and create tables - execute each command separately
-      yield* Effect.tryPromise(() => db.query("CREATE EXTENSION IF NOT EXISTS vector")).pipe(
+      yield* Effect.tryPromise(() => db.query<void>("CREATE EXTENSION IF NOT EXISTS vector")).pipe(
         Effect.catchTag("UnknownException", Effect.die)
       )
 
       yield* Effect.tryPromise(() =>
-        db.query(`
+        db.query<void>(`
           CREATE TABLE IF NOT EXISTS embeddings (
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
@@ -41,7 +41,7 @@ export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
       )
 
       yield* Effect.tryPromise(() =>
-        db.query(`
+        db.query<void>(`
           CREATE INDEX IF NOT EXISTS embedding_idx 
           ON embeddings 
           USING ivfflat (embedding vector_cosine_ops)

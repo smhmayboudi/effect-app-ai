@@ -307,7 +307,9 @@ Question: ${question}`
     const clearVectorStore = () =>
       Effect.gen(function*() {
         const pglite = yield* PGLiteVectorService
-        yield* Effect.tryPromise(() => pglite.db.query("DELETE FROM embeddings"))
+        yield* Effect.tryPromise(() => pglite.db.query<void>("DELETE FROM embeddings")).pipe(
+          Effect.catchTag("UnknownException", Effect.die)
+        )
       })
 
     return {
