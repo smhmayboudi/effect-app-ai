@@ -1,12 +1,38 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { PGLiteVectorService } from "./PGLiteVectorService.js"
+
+export const In = Schema.Struct({
+  id: Schema.String,
+  content: Schema.String,
+  embedding: Schema.Array(Schema.Number),
+  type: Schema.Literal("order", "product", "user"),
+  entity_id: Schema.String,
+  metadata: Schema.optionalWith(
+    Schema.Record({ key: Schema.String, value: Schema.Number }),
+    { exact: true }
+  )
+})
+export type In = typeof In.Type
+
+export const Out = Schema.Struct({
+  id: Schema.String,
+  content: Schema.String,
+  type: Schema.Literal("order", "product", "user"),
+  entity_id: Schema.String,
+  metadata: Schema.optionalWith(
+    Schema.Record({ key: Schema.String, value: Schema.Number }),
+    { exact: true }
+  ),
+  similarity: Schema.Number
+})
+export type Out = typeof Out.Type
 
 export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVectorOps", {
   effect: Effect.gen(function*() {
     const pglite = yield* PGLiteVectorService
 
     // Helper function to format embeddings for PGLite
-    const formatEmbedding = (embedding: Array<number>): string => {
+    const formatEmbedding = (embedding: ReadonlyArray<number>): string => {
       return `[${embedding.join(",")}]`
     }
 
@@ -35,15 +61,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
     const findSimilar = (itemId: string, limit: number = 5) =>
       Effect.gen(function*() {
         const result = yield* Effect.tryPromise(() =>
-          pglite.db.query<{
-            id: string
-            content: string
-            // embedding: Array<number>
-            type: "order" | "product" | "user"
-            entity_id: string
-            metadata?: Record<string, any>
-            similarity: number
-          }>(
+          pglite.db.query<Out>(
             `
               WITH target AS (
                 SELECT embedding FROM embeddings WHERE id = $1
@@ -93,15 +111,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         params.push(limit)
 
         const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<{
-            id: string
-            content: string
-            // embedding: Array<number>
-            type: "order" | "product" | "user"
-            entity_id: string
-            metadata?: Record<string, any>
-            similarity: number
-          }>(
+          pglite.db.query<Out>(
             `SELECT 
                 id,
                 content,
@@ -132,7 +142,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
 
         // Format the query embedding for PGLite
         const formattedEmbedding = formatEmbedding(queryEmbedding)
-        const params: any[] = [formattedEmbedding, similarityThreshold]
+        const params: Array<any> = [formattedEmbedding, similarityThreshold]
         const whereConditions = ["1 <= 2"]
 
         if (filters.type) {
@@ -148,15 +158,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         params.push(limit)
 
         const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<{
-            id: string
-            content: string
-            // embedding: Array<number>
-            type: "order" | "product" | "user"
-            entity_id: string
-            metadata?: Record<string, any>
-            similarity: number
-          }>(
+          pglite.db.query<Out>(
             `SELECT 
                 id,
                 content,
@@ -177,14 +179,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         return results.rows
       })
 
-    const storeEmbedding = (data: {
-      id: string
-      content: string
-      embedding: Array<number>
-      type: "order" | "product" | "user"
-      entity_id: string
-      metadata?: Record<string, any>
-    }) =>
+    const storeEmbedding = (data: In) =>
       Effect.tryPromise(() =>
         pglite.db.query<void>(
           `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
@@ -207,16 +202,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
     // Advanced vector operations
-    const storeEmbeddingBatch = (
-      items: Array<{
-        id: string
-        content: string
-        embedding: Array<number>
-        type: string
-        entity_id: string
-        metadata?: Record<string, any>
-      }>
-    ) =>
+    const storeEmbeddingBatch = (items: Array<In>) =>
       Effect.tryPromise(() =>
         pglite.db.query<void>(
           `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)

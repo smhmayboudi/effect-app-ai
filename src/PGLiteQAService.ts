@@ -1,7 +1,7 @@
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
 import { Effect, Schedule } from "effect"
 import { MockDatabaseService, type Order, type Product, type User } from "./MockDatabaseService.js"
-import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
+import { In, PGLiteVectorOps } from "./PGLiteVectorOps.js"
 import { PGLiteVectorService } from "./PGLiteVectorService.js"
 
 export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQAService", {
@@ -179,14 +179,14 @@ Question: ${question}`
         const content = `User: ${user.name}, Email: ${user.email}, Role: ${user.role}, Department: ${user.department}`
         const embedding = yield* embeddingModel.embed(content)
 
-        return {
+        return In.make({
           id: `user_${user.id}`,
           content,
           embedding,
           type: "user",
           entity_id: user.id.toString(),
           metadata: user
-        }
+        })
       })
 
     const prepareOrderEmbedding = (order: any, embeddingModel: EmbeddingModel.Service) =>
@@ -197,14 +197,14 @@ Question: ${question}`
           }`
         const embedding = yield* embeddingModel.embed(content)
 
-        return {
+        return In.make({
           id: `order_${order.id}`,
           content,
           embedding,
           type: "order",
           entity_id: order.id.toString(),
           metadata: order
-        }
+        })
       })
 
     const prepareProductEmbedding = (product: any, embeddingModel: EmbeddingModel.Service) =>
@@ -213,14 +213,14 @@ Question: ${question}`
           `Product: ${product.name}, Category: ${product.category}, Price: $${product.price}, Description: ${product.description}`
         const embedding = yield* embeddingModel.embed(content)
 
-        return {
+        return In.make({
           id: `product_${product.id}`,
           content,
           embedding,
           type: "product",
           entity_id: product.id.toString(),
           metadata: product
-        }
+        })
       })
 
     // Batch embedding generation with error handling
