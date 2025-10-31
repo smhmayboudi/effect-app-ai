@@ -61,7 +61,7 @@ const OpenAiWithHttp = Layer.provide(OpenAi, NodeHttpClient.layerUndici)
 
 // Create the complete AI layers by providing the OpenAI client
 const EmbeddingModelLayer = Layer.provide(
-  OpenAiEmbeddingModel.model("text-embedding-ada-002", { mode: "batched" }),
+  OpenAiEmbeddingModel.model("text-embedding-3-small", { mode: "batched" }),
   OpenAiWithHttp
 )
 const LanguageModelLayer = Layer.provide(
