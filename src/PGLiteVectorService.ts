@@ -6,7 +6,7 @@ import { Effect } from "effect"
 export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
   "PGLiteVectorService",
   {
-    effect: Effect.gen(function*() {
+    scoped: Effect.gen(function*() {
       // Create database resource with acquireRelease
       const db = yield* Effect.acquireRelease(
         // Acquire: initialize PGLite with vector support

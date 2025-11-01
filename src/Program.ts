@@ -80,7 +80,7 @@ const CoreLayers = Layer.merge(
   MockDatabaseService.Default,
   Layer.provideMerge(
     PGLiteVectorOps.Default,
-    PGLiteVectorService.Default.pipe(Layer.provide(Layer.scope))
+    PGLiteVectorService.Default
   )
 )
 
