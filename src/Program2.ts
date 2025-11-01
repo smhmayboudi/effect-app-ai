@@ -33,7 +33,7 @@ const biDemoProgram = Effect.gen(function*() {
   for (const query of nlQueries) {
     console.log(`\n🗣️  NL Query: "${query}"`)
     const result = yield* biService.naturalLanguageToDashboard(query)
-    console.log(`📈 Visualization: ${result.visualization}`)
+    console.log(`📈 Visualization Type: ${result.visualizationType}`)
     console.log(`💡 Insights: ${result.insights}`)
   }
 

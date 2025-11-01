@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { MockDatabaseService, type Order, type User } from "./MockDatabaseService.js"
+import { MockDatabaseService, type Order, type Product, type User } from "./MockDatabaseService.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
 
 export const BusinessInsight = Schema.Struct({
@@ -62,17 +62,18 @@ export class BusinessIntelligenceService
       // 2. Natural Language Query to Dashboard
       const naturalLanguageToDashboard = (query: string) =>
         Effect.gen(function*() {
-          const analysis = yield* qaService.getQuestionAnalysis(query)
           const visualizationType = yield* determineVisualizationType(query)
+          const analysis = yield* qaService.getQuestionAnalysis(query)
           const data = yield* executeAnalyticalQuery(analysis)
           const insights = yield* generateDataInsights(data, query)
+          const suggestedActions = yield* generateRecommendedActions(insights)
 
           return {
             query,
-            visualization: visualizationType,
+            visualizationType,
             data: data.slice(0, 10), // Limit data size for response
             insights,
-            suggestedActions: yield* generateRecommendedActions(insights)
+            suggestedActions
           }
         })
 
@@ -260,7 +261,7 @@ export class BusinessIntelligenceService
           return "table"
         })
 
-      const executeAnalyticalQuery = (analysis: any) =>
+      const executeAnalyticalQuery = (analysis: { entities?: Array<string> }) =>
         Effect.gen(function*() {
           if (analysis.entities?.includes("order")) {
             return yield* db.getOrders()
@@ -275,7 +276,7 @@ export class BusinessIntelligenceService
           return yield* db.getOrders()
         })
 
-      const generateDataInsights = (data: any, originalQuery: string) =>
+      const generateDataInsights = (data: Array<User> | Array<Order> | Array<Product>, originalQuery: string) =>
         qaService.answerQuestion(
           `Analyze this business data and provide 3 key insights. Data sample: ${
             JSON.stringify(data.slice(0, 5))
@@ -339,15 +340,70 @@ export class BusinessIntelligenceService
         return "at-risk"
       }
 
-      const groupBySegment = (segments: Array<any>) => {
+      const groupBySegment = (
+        segments: Array<{
+          user: {
+            readonly name: string
+            readonly id: number
+            readonly email: string
+            readonly role: string
+            readonly department: string
+          }
+          segment: string
+          metrics: {
+            recency: number
+            frequency: number
+            monetary: number
+            totalOrders: number
+          }
+        }>
+      ) => {
         return segments.reduce((acc, segment) => {
           acc[segment.segment] = acc[segment.segment] || []
           acc[segment.segment].push(segment)
           return acc
-        }, {} as Record<string, Array<any>>)
+        }, {} as Record<
+          string,
+          Array<{
+            user: {
+              readonly name: string
+              readonly id: number
+              readonly email: string
+              readonly role: string
+              readonly department: string
+            }
+            segment: string
+            metrics: {
+              recency: number
+              frequency: number
+              monetary: number
+              totalOrders: number
+            }
+          }>
+        >)
       }
 
-      const calculateSegmentStats = (groupedSegments: Record<string, Array<any>>) => {
+      const calculateSegmentStats = (
+        groupedSegments: Record<
+          string,
+          Array<{
+            user: {
+              readonly name: string
+              readonly id: number
+              readonly email: string
+              readonly role: string
+              readonly department: string
+            }
+            segment: string
+            metrics: {
+              recency: number
+              frequency: number
+              monetary: number
+              totalOrders: number
+            }
+          }>
+        >
+      ) => {
         return Object.entries(groupedSegments).reduce((acc, [segment, customers]) => {
           const totalRevenue = customers.reduce((sum, customer) => sum + customer.metrics.monetary, 0)
           const avgOrderValue = totalRevenue / customers.reduce((sum, customer) => sum + customer.metrics.frequency, 1)
@@ -359,17 +415,33 @@ export class BusinessIntelligenceService
             avgRecency: Math.round(customers.reduce((sum, c) => sum + c.metrics.recency, 0) / customers.length)
           }
           return acc
-        }, {} as Record<string, any>)
+        }, {} as Record<string, {
+          customerCount: number
+          totalRevenue: number
+          avgOrderValue: number
+          avgRecency: number
+        }>)
       }
 
-      const generateSegmentRecommendations = (segmentStats: Record<string, any>) =>
+      const generateSegmentRecommendations = (
+        segmentStats: Record<string, {
+          customerCount: number
+          totalRevenue: number
+          avgOrderValue: number
+          avgRecency: number
+        }>
+      ) =>
         qaService.answerQuestion(
           `Based on these customer segment statistics: ${
             JSON.stringify(segmentStats)
           }, provide targeted marketing and retention recommendations for each segment.`
         )
 
-      const identifyTrendFactors = (trend: any, orders: Array<Order>) =>
+      const identifyTrendFactors = (trend: {
+        direction: string
+        confidence: number
+        forecast: number
+      }, orders: Array<Order>) =>
         qaService.answerQuestion(
           `Analyze order patterns to identify factors influencing the ${trend.direction} trend. Sample orders: ${
             JSON.stringify(orders.slice(0, 3))
