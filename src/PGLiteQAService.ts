@@ -1,19 +1,28 @@
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
 import { Effect, Schedule } from "effect"
 import { MockDatabaseService, type Order, type Product, type User } from "./MockDatabaseService.js"
-import { In, PGLiteVectorOps } from "./PGLiteVectorOps.js"
+import { In, type Out, PGLiteVectorOps } from "./PGLiteVectorOps.js"
 import { PGLiteVectorService } from "./PGLiteVectorService.js"
 
 export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQAService", {
   effect: Effect.gen(function*() {
+    type StructuredData = { users?: Array<User>; orders?: Array<Order>; products?: Array<Product> }
+
     const db = yield* MockDatabaseService
     const vectorOps = yield* PGLiteVectorOps
+    const languageModel = yield* LanguageModel.LanguageModel
+    const embeddingModel = yield* EmbeddingModel.EmbeddingModel
 
     const answerQuestion = (question: string) =>
       Effect.gen(function*() {
         // Step 1: Generate real embedding for the question
-        const embeddingModel = yield* EmbeddingModel.EmbeddingModel
-        const questionEmbedding = yield* embeddingModel.embed(question)
+        const questionEmbedding = yield* embeddingModel.embed(question).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
         // Step 2: Semantic search in PGLite
         const inferEntityTypeFromQuestion = inferEntityType(question)
@@ -69,13 +78,13 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
             db.getProducts()
           ], { concurrency: 3 })
 
-          return { users, orders, products }
+          return { users, orders, products } as StructuredData
         }
 
         // Filter by specific entity IDs
         const entityType = inferEntityType(question)
 
-        const data: any = {}
+        const data: StructuredData = {}
 
         if (entityType === "user" || !entityType) {
           data.users = yield* db.getUsers({ ids: entityIds })
@@ -94,19 +103,11 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
 
     const generateAnswer = (
       question: string,
-      context: Array<{
-        id: string
-        content: string
-        // embedding: Array<number>
-        type: "order" | "product" | "user"
-        entity_id: string
-        metadata?: Record<string, any>
-        similarity: number
-      }>,
-      structuredData: Order | Product | User
+      context: Array<Out>,
+      structuredData: StructuredData
     ) =>
       Effect.gen(function*() {
-        const response = yield* LanguageModel.generateText({
+        const response = yield* languageModel.generateText({
           prompt: `
 You are a helpful business assistant. Use the semantic context and structured data to answer the question accurately.
 
@@ -129,7 +130,13 @@ Guidelines:
 - Include specific numbers and details when available
 
 Question: ${question}`
-        })
+        }).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
         return response.text
       })
@@ -137,7 +144,6 @@ Question: ${question}`
     // Data synchronization with real embeddings
     const syncDataToVectorStore = () =>
       Effect.gen(function*() {
-        const embeddingModel = yield* EmbeddingModel.EmbeddingModel
         const [users, orders, products] = yield* Effect.all([
           db.getUsers(),
           db.getOrders(),
@@ -174,10 +180,16 @@ Question: ${question}`
         }
       })
 
-    const prepareUserEmbedding = (user: any, embeddingModel: EmbeddingModel.Service) =>
+    const prepareUserEmbedding = (user: User, embeddingModel: EmbeddingModel.Service) =>
       Effect.gen(function*() {
         const content = `User: ${user.name}, Email: ${user.email}, Role: ${user.role}, Department: ${user.department}`
-        const embedding = yield* embeddingModel.embed(content)
+        const embedding = yield* embeddingModel.embed(content).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
         return In.make({
           id: `user_${user.id}`,
@@ -189,13 +201,19 @@ Question: ${question}`
         })
       })
 
-    const prepareOrderEmbedding = (order: any, embeddingModel: EmbeddingModel.Service) =>
+    const prepareOrderEmbedding = (order: Order, embeddingModel: EmbeddingModel.Service) =>
       Effect.gen(function*() {
         const content =
           `Order #${order.id}: ${order.description}, Amount: $${order.amount}, Status: ${order.status}, Customer ID: ${order.customer_id}, Created: ${
             order.created_at.toISOString().split("T")[0]
           }`
-        const embedding = yield* embeddingModel.embed(content)
+        const embedding = yield* embeddingModel.embed(content).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
         return In.make({
           id: `order_${order.id}`,
@@ -207,11 +225,17 @@ Question: ${question}`
         })
       })
 
-    const prepareProductEmbedding = (product: any, embeddingModel: EmbeddingModel.Service) =>
+    const prepareProductEmbedding = (product: Product, embeddingModel: EmbeddingModel.Service) =>
       Effect.gen(function*() {
         const content =
           `Product: ${product.name}, Category: ${product.category}, Price: $${product.price}, Description: ${product.description}`
-        const embedding = yield* embeddingModel.embed(content)
+        const embedding = yield* embeddingModel.embed(content).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
         return In.make({
           id: `product_${product.id}`,
@@ -226,14 +250,18 @@ Question: ${question}`
     // Batch embedding generation with error handling
     const generateBatchEmbeddings = (texts: Array<string>) =>
       Effect.gen(function*() {
-        const embeddingModel = yield* EmbeddingModel.EmbeddingModel
-
         if (texts.length === 0) {
           return []
         }
 
         // Use embedMany directly - it returns Array<Array<number>>
         const embeddings = yield* embeddingModel.embedMany(texts).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        ).pipe(
           Effect.retry({ times: 2, schedule: Schedule.fixed("100 millis") })
         )
 
@@ -243,15 +271,19 @@ Question: ${question}`
     // Enhanced semantic search with query expansion
     const enhancedSemanticSearch = (question: string) =>
       Effect.gen(function*() {
-        const embeddingModel = yield* EmbeddingModel.EmbeddingModel
-
         // Generate multiple query variations for better search
         const queryVariations = yield* generateQueryVariations(question)
 
         const allResults = yield* Effect.all(
           queryVariations.map((variation) =>
             Effect.gen(function*() {
-              const embedding = yield* embeddingModel.embed(variation)
+              const embedding = yield* embeddingModel.embed(variation).pipe(
+                Effect.catchTag("HttpRequestError", Effect.die),
+                Effect.catchTag("HttpResponseError", Effect.die),
+                Effect.catchTag("MalformedInput", Effect.die),
+                Effect.catchTag("MalformedOutput", Effect.die),
+                Effect.catchTag("UnknownError", Effect.die)
+              )
               return yield* vectorOps.semanticSearch(embedding, {
                 limit: 3,
                 similarityThreshold: 0.7
@@ -273,14 +305,20 @@ Question: ${question}`
 
     const generateQueryVariations = (question: string) =>
       Effect.gen(function*() {
-        const response = yield* LanguageModel.generateText({
+        const response = yield* languageModel.generateText({
           prompt: `
 Generate 3 different variations of the user's question that might help find relevant information in a database.
 Return as a JSON array of strings.
 
 Question: ${question}
 `
-        })
+        }).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
         return yield* Effect.try(() => JSON.parse(response.text) as Array<string>).pipe(
           Effect.catchAll(() => Effect.succeed([question])) // Fallback to original question
@@ -290,7 +328,7 @@ Question: ${question}
     // Additional utility methods
     const getQuestionAnalysis = (question: string) =>
       Effect.gen(function*() {
-        const response = yield* LanguageModel.generateText({
+        const response = yield* languageModel.generateText({
           prompt: `
 Analyze the business question and determine:
 1. What entities are mentioned (users, orders, products)
@@ -299,9 +337,15 @@ Analyze the business question and determine:
 Return as JSON format.
 
 Question: ${question}`
-        })
+        }).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
+        )
 
-        return Effect.try(() => JSON.parse(response.text))
+        return JSON.parse(response.text)
       })
 
     const clearVectorStore = () =>

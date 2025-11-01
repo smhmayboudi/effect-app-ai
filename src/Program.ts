@@ -93,8 +93,8 @@ const AppLayer = Layer.provideMerge(
 // Run with real embeddings
 pipe(
   realEmbeddingsProgram,
-  Effect.provide(AiLayers),
   Effect.provide(AppLayer),
+  Effect.provide(AiLayers),
   Effect.tapBoth({
     onFailure: (error) => Effect.sync(() => console.error("💥 Error:", error)),
     onSuccess: (result) => Effect.sync(() => console.log(result))

@@ -100,8 +100,8 @@ const BILayer = Layer.provideMerge(
 // Run the BI demo
 pipe(
   biDemoProgram,
-  Effect.provide(AiLayers),
   Effect.provide(BILayer),
+  Effect.provide(AiLayers),
   Effect.tapBoth({
     onFailure: (error) => Effect.sync(() => console.error("💥 BI Error:", error)),
     onSuccess: (result) => Effect.sync(() => console.log(result))
