@@ -284,10 +284,7 @@ Question: ${question}`
                 Effect.catchTag("MalformedOutput", Effect.die),
                 Effect.catchTag("UnknownError", Effect.die)
               )
-              return yield* vectorOps.semanticSearch(embedding, {
-                limit: 3,
-                similarityThreshold: 0.7
-              })
+              return yield* vectorOps.semanticSearch(embedding, { limit: 3 })
             })
           ),
           { concurrency: 2 }
@@ -373,16 +370,12 @@ Question: ${question}`
         // Find products similar to user's preference profile
         const similarToProfile = yield* vectorOps.semanticSearch(
           userProfiles.map((userProfile) => userProfile.avg_embedding)[0],
-          {
-            limit: 10,
-            similarityThreshold: 0.7,
-            filters: { type: "product" }
-          }
+          { filters: { type: "product" } }
         )
 
         // Also find products similar to their most recent order
         const latestOrderId = `order_${userOrders[userOrders.length - 1].id}`
-        const similarToLatest = yield* vectorOps.findSimilar(latestOrderId, 5)
+        const similarToLatest = yield* vectorOps.findSimilar(latestOrderId)
 
         // Combine and deduplicate results
         const allRecommendations = [...similarToProfile, ...similarToLatest]

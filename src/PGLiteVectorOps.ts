@@ -41,8 +41,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       Effect.gen(function*() {
         const result = yield* Effect.tryPromise(() =>
           pglite.db.query<{ avg_embedding: string }>(
-            `
-              SELECT AVG(embedding) as avg_embedding
+            `SELECT AVG(embedding) as avg_embedding
               FROM embeddings 
               WHERE id = ANY($1)
             `,
@@ -58,25 +57,23 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       })
 
     // Find similar items to a given item
-    const findSimilar = (itemId: string, limit: number = 5) =>
+    const findSimilar = (itemId: string, options?: {
+      limit?: number
+    }) =>
       Effect.gen(function*() {
+        const { limit = 5 } = options || {}
+
         const result = yield* Effect.tryPromise(() =>
           pglite.db.query<Out>(
             `
               WITH target AS (
                 SELECT embedding FROM embeddings WHERE id = $1
               )
-              SELECT 
-                e.id,
-                e.content, 
-                e.type,
-                e.entity_id,
-                e.metadata,
-                1 - (e.embedding <=> t.embedding) as similarity
-              FROM embeddings e, target t
-              WHERE e.id != $1
-              ORDER BY e.embedding <=> t.embedding
-              LIMIT $2
+              SELECT e.id, e.content, e.type, e.entity_id, e.metadata, 1 - (e.embedding <=> t.embedding) as similarity
+                FROM embeddings e, target t
+                WHERE e.id != $1
+                ORDER BY e.embedding <=> t.embedding
+                LIMIT $2
             `,
             [itemId, limit]
           )
@@ -86,9 +83,9 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       })
 
     const hybridSearch = (query: string, queryEmbedding: Array<number>, options?: {
+      filters?: { type?: string }
       limit?: number
       similarityThreshold?: number
-      filters?: { type?: string }
     }) =>
       Effect.gen(function*() {
         const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
@@ -112,16 +109,9 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
 
         const results = yield* Effect.tryPromise(() =>
           pglite.db.query<Out>(
-            `SELECT 
-                id,
-                content,
-                type,
-                entity_id,
-                metadata,
-                1 - (embedding <=> $1) as similarity
+            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity
               FROM embeddings
-              WHERE ${whereConditions.join(" AND ")}
-                AND (1 - (embedding <=> $1)) >= $2
+              WHERE ${whereConditions.join(" AND ")} AND (1 - (embedding <=> $1)) >= $2
               ORDER BY embedding <=> $1
               LIMIT $${params.length}
             `,
@@ -132,13 +122,13 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         return results.rows
       })
 
-    const semanticSearch = (queryEmbedding: Array<number>, options: {
+    const semanticSearch = (queryEmbedding: Array<number>, options?: {
+      filters?: { entity_id?: string; type?: string }
       limit?: number
       similarityThreshold?: number
-      filters?: { type?: string; entity_id?: string }
-    } = {}) =>
+    }) =>
       Effect.gen(function*() {
-        const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options
+        const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
 
         // Format the query embedding for PGLite
         const formattedEmbedding = formatEmbedding(queryEmbedding)
@@ -159,16 +149,9 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
 
         const results = yield* Effect.tryPromise(() =>
           pglite.db.query<Out>(
-            `SELECT 
-                id,
-                content,
-                type,
-                entity_id,
-                metadata,
-                1 - (embedding <=> $1) as similarity
+            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity
               FROM embeddings
-              WHERE ${whereConditions.join(" AND ")}
-                AND (1 - (embedding <=> $1)) >= $2
+              WHERE ${whereConditions.join(" AND ")} AND (1 - (embedding <=> $1)) >= $2
               ORDER BY embedding <=> $1
               LIMIT $${params.length}
             `,
