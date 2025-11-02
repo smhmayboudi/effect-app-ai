@@ -211,13 +211,169 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         )
       ).pipe(Effect.catchTag("UnknownException", Effect.die))
 
+    // Enhanced semantic search with multiple distance metrics
+    const multiMetricSearch = (queryEmbedding: Array<number>, options?: {
+      limit?: number
+      metric?: "cosine" | "l2" | "inner_product" | "l1"
+    }) =>
+      Effect.gen(function*() {
+        const { limit = 10, metric = "cosine" } = options || {}
+
+        const distanceFunctions = {
+          cosine: "<=>",
+          l2: "<->",
+          inner_product: "<#>",
+          l1: "<+>"
+        }
+        const distanceOp = distanceFunctions[metric]
+
+        const results = yield* Effect.tryPromise(() =>
+          pglite.db.query<Out & { distance: number }>(
+            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity, (embedding ${distanceOp} $1) as distance
+              FROM embeddings
+              ORDER BY embedding ${distanceOp} $1
+              LIMIT $2
+            `,
+            [formatEmbedding(queryEmbedding), limit]
+          )
+        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+
+        return results.rows
+      })
+
+    // Detect outliers using L2 distance
+    const detectAnomalies = (threshold: number = 2.0, options?: {
+      limit?: number
+    }) =>
+      Effect.gen(function*() {
+        const { limit = 20 } = options || {}
+
+        // Calculate centroid of all embeddings
+        const centroidResult = yield* Effect.tryPromise(() =>
+          pglite.db.query<{ centroid: string }>(
+            `SELECT AVG(embedding) as centroid FROM embeddings`
+          )
+        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+
+        const centroid = JSON.parse(centroidResult.rows[0].centroid)
+
+        // Find items far from centroid (L2 distance)
+        const anomalies = yield* Effect.tryPromise(() =>
+          pglite.db.query<Out & { distance: number }>(
+            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity, (embedding <-> $1) as distance
+              FROM embeddings
+              WHERE (embedding <-> $1) > $2
+              ORDER BY distance DESC
+              LIMIT $3
+            `,
+            [formatEmbedding(centroid), threshold, limit]
+          )
+        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+
+        return anomalies.rows
+      })
+
+    // Cluster analysis using multiple distance metrics
+    const clusterAnalysis = () =>
+      Effect.gen(function*() {
+        // Simple k-means like clustering using distance to centroids
+        const segments = ["champions", "loyal", "potential", "at-risk"]
+
+        const segmentCentroids = yield* Effect.all(
+          segments.map((segment) =>
+            Effect.tryPromise(() =>
+              pglite.db.query<{ centroid: string }>(
+                `SELECT AVG(embedding) as centroid 
+                  FROM embeddings e
+                  JOIN users u ON e.entity_id = u.id::text
+                  WHERE e.type = 'user' 
+                  AND u.segment = $1
+                `,
+                [segment]
+              ).then((result) => ({
+                segment,
+                centroid: result.rows[0] ? JSON.parse(result.rows[0].centroid) : null
+              }))
+            ).pipe(Effect.catchTag("UnknownException", Effect.die))
+          ),
+          { concurrency: 2 }
+        )
+
+        // Find closest segments for each user
+        const userSegments = yield* Effect.tryPromise(() =>
+          pglite.db.query<{ user_id: string; segment: string; confidence: number }>(
+            `WITH centroids AS (
+              SELECT * FROM (VALUES 
+                ${
+              segmentCentroids.filter((sc) => sc.centroid).map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}::vector)`).join(
+                ", "
+              )
+            }
+              ) AS t(segment, centroid)
+            )
+            SELECT e.entity_id as user_id, c.segment, 1 - (e.embedding <=> c.centroid) as confidence
+              FROM embeddings e
+              CROSS JOIN centroids c
+              WHERE e.type = 'user'
+              QUALIFY ROW_NUMBER() OVER (PARTITION BY e.entity_id ORDER BY e.embedding <=> c.centroid) = 1
+            `
+          )
+        )
+
+        return userSegments.rows
+      })
+
+    // Multi-stage search with different distance metrics
+    const advancedSemanticSearch = (query: string, queryEmbedding: Array<number>, options?: {
+      filters?: { entity_id?: string; type?: string }
+      limit?: number
+      similarityThreshold?: number
+    }) =>
+      Effect.gen(function*() {
+        // Stage 1: Broad search with cosine similarity
+        const broadResults = yield* semanticSearch(queryEmbedding, options)
+
+        if (broadResults.length === 0) {
+          return []
+        }
+
+        // Stage 2: Re-rank using multiple distance metrics
+        const formattedEmbedding = formatEmbedding(queryEmbedding)
+        const ids = broadResults.map((r) => r.id)
+
+        const rerankedResults = yield* Effect.tryPromise(() =>
+          pglite.db.query<Out & { cosine_score: number; l2_score: number; combined_score: number }>(
+            `SELECT 
+                id, content, type, entity_id, metadata,
+                1 - (embedding <=> $1) as cosine_score,
+                - (embedding <-> $1) as l2_score,  -- Negative because lower L2 is better
+                (1 - (embedding <=> $1)) * 0.7 + (- (embedding <-> $1)) * 0.3 as combined_score
+              FROM embeddings
+              WHERE id = ANY($2)
+              ORDER BY combined_score DESC
+              LIMIT 10
+            `,
+            [formattedEmbedding, ids]
+          )
+        )
+
+        return rerankedResults.rows.map((row) => ({
+          ...row,
+          similarity: row.combined_score
+        }))
+      })
+
     return {
       averageEmbedding,
       findSimilar,
       hybridSearch,
       semanticSearch,
       storeEmbedding,
-      storeEmbeddingBatch
+      storeEmbeddingBatch,
+      multiMetricSearch,
+      detectAnomalies,
+      clusterAnalysis,
+      advancedSemanticSearch
     }
   })
 }) {}
