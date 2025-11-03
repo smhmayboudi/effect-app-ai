@@ -142,109 +142,87 @@ Question: ${question}`
       })
 
     // Data synchronization with real embeddings
+    // In PGLiteQAService.ts - Replace individual embedding calls
     const syncDataToVectorStore = () =>
       Effect.gen(function*() {
         const [users, orders, products] = yield* Effect.all([
           db.getUsers(),
           db.getOrders(),
           db.getProducts()
-        ], { concurrency: 3 })
+        ], { concurrency: "unbounded" })
 
-        // Prepare embeddings data with real embeddings
-        const usersData = yield* Effect.all(
-          users.map((user) => prepareUserEmbedding(user, embeddingModel)),
-          { concurrency: 2 }
+        // Batch process embeddings
+        const allTexts = [
+          ...users.map((user) =>
+            `User: ${user.name}, Email: ${user.email}, Role: ${user.role}, Department: ${user.department}`
+          ),
+          ...orders.map((order) =>
+            `Order #${order.id}: ${order.description}, Amount: $${order.amount}, Status: ${order.status}, Customer ID: ${order.customer_id}, Created: ${
+              order.created_at.toISOString().split("T")[0]
+            }`
+          ),
+          ...products.map((product) =>
+            `Product: ${product.name}, Category: ${product.category}, Price: $${product.price}, Description: ${product.description}`
+          )
+        ]
+
+        const allEmbeddings = yield* embeddingModel.embedMany(allTexts).pipe(
+          Effect.retry({ times: 2, schedule: Schedule.fixed("100 millis") })
+        ).pipe(
+          Effect.catchTag("HttpRequestError", Effect.die),
+          Effect.catchTag("HttpResponseError", Effect.die),
+          Effect.catchTag("MalformedInput", Effect.die),
+          Effect.catchTag("MalformedOutput", Effect.die),
+          Effect.catchTag("UnknownError", Effect.die)
         )
 
-        const ordersData = yield* Effect.all(
-          orders.map((order) => prepareOrderEmbedding(order, embeddingModel)),
-          { concurrency: 2 }
-        )
+        // Create batch items
+        const batchItems: Array<In> = []
+        let embeddingIndex = 0
 
-        const productsData = yield* Effect.all(
-          products.map((product) => prepareProductEmbedding(product, embeddingModel)),
-          { concurrency: 2 }
-        )
+        users.forEach((user) => {
+          batchItems.push(In.make({
+            id: `user_${user.id}`,
+            content: allTexts[embeddingIndex],
+            embedding: allEmbeddings[embeddingIndex],
+            type: "user",
+            entity_id: user.id.toString(),
+            metadata: user
+          }))
+          embeddingIndex++
+        })
 
-        // Batch insert into PGLite
-        yield* vectorOps.storeEmbeddingBatch([
-          ...usersData,
-          ...ordersData,
-          ...productsData
-        ])
+        orders.forEach((order) => {
+          batchItems.push(In.make({
+            id: `order_${order.id}`,
+            content: allTexts[embeddingIndex],
+            embedding: allEmbeddings[embeddingIndex],
+            type: "order",
+            entity_id: order.id.toString(),
+            metadata: order
+          }))
+          embeddingIndex++
+        })
+
+        products.forEach((product) => {
+          batchItems.push(In.make({
+            id: `product_${product.id}`,
+            content: allTexts[embeddingIndex],
+            embedding: allEmbeddings[embeddingIndex],
+            type: "product",
+            entity_id: product.id.toString(),
+            metadata: product
+          }))
+          embeddingIndex++
+        })
+
+        yield* vectorOps.storeEmbeddingBatch(batchItems)
 
         return {
-          users: usersData.length,
-          orders: ordersData.length,
-          products: productsData.length
+          users: users.length,
+          orders: orders.length,
+          products: products.length
         }
-      })
-
-    const prepareUserEmbedding = (user: User, embeddingModel: EmbeddingModel.Service) =>
-      Effect.gen(function*() {
-        const content = `User: ${user.name}, Email: ${user.email}, Role: ${user.role}, Department: ${user.department}`
-        const embedding = yield* embeddingModel.embed(content).pipe(
-          Effect.catchTag("HttpRequestError", Effect.die),
-          Effect.catchTag("HttpResponseError", Effect.die),
-          Effect.catchTag("MalformedInput", Effect.die),
-          Effect.catchTag("MalformedOutput", Effect.die),
-          Effect.catchTag("UnknownError", Effect.die)
-        )
-
-        return In.make({
-          id: `user_${user.id}`,
-          content,
-          embedding,
-          type: "user",
-          entity_id: user.id.toString(),
-          metadata: user
-        })
-      })
-
-    const prepareOrderEmbedding = (order: Order, embeddingModel: EmbeddingModel.Service) =>
-      Effect.gen(function*() {
-        const content =
-          `Order #${order.id}: ${order.description}, Amount: $${order.amount}, Status: ${order.status}, Customer ID: ${order.customer_id}, Created: ${
-            order.created_at.toISOString().split("T")[0]
-          }`
-        const embedding = yield* embeddingModel.embed(content).pipe(
-          Effect.catchTag("HttpRequestError", Effect.die),
-          Effect.catchTag("HttpResponseError", Effect.die),
-          Effect.catchTag("MalformedInput", Effect.die),
-          Effect.catchTag("MalformedOutput", Effect.die),
-          Effect.catchTag("UnknownError", Effect.die)
-        )
-
-        return In.make({
-          id: `order_${order.id}`,
-          content,
-          embedding,
-          type: "order",
-          entity_id: order.id.toString(),
-          metadata: order
-        })
-      })
-
-    const prepareProductEmbedding = (product: Product, embeddingModel: EmbeddingModel.Service) =>
-      Effect.gen(function*() {
-        const content =
-          `Product: ${product.name}, Category: ${product.category}, Price: $${product.price}, Description: ${product.description}`
-        const embedding = yield* embeddingModel.embed(content).pipe(
-          Effect.catchTag("HttpRequestError", Effect.die),
-          Effect.catchTag("HttpResponseError", Effect.die),
-          Effect.catchTag("MalformedInput", Effect.die),
-          Effect.catchTag("MalformedOutput", Effect.die),
-          Effect.catchTag("UnknownError", Effect.die)
-        )
-
-        return In.make({
-          id: `product_${product.id}`,
-          content,
-          embedding,
-          type: "product",
-          entity_id: product.id.toString(),
-          metadata: product
-        })
       })
 
     // Batch embedding generation with error handling
@@ -287,7 +265,7 @@ Question: ${question}`
               return yield* vectorOps.semanticSearch(embedding, { limit: 3 })
             })
           ),
-          { concurrency: 2 }
+          { concurrency: "unbounded" }
         )
 
         // Deduplicate and rank results

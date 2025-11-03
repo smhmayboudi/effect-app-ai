@@ -296,7 +296,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
               }))
             ).pipe(Effect.catchTag("UnknownException", Effect.die))
           ),
-          { concurrency: 2 }
+          { concurrency: 4 }
         )
 
         // Find closest segments for each user
