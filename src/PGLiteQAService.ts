@@ -29,8 +29,7 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
         const relevantContext = yield* vectorOps.semanticSearch(
           questionEmbedding,
           {
-            limit: 5,
-            similarityThreshold: 0.8,
+            similarityThreshold: 0.3,
             filters: { ...(inferEntityTypeFromQuestion ? { type: inferEntityTypeFromQuestion } : {}) }
           }
         )
@@ -149,20 +148,20 @@ Question: ${question}`
           db.getUsers(),
           db.getOrders(),
           db.getProducts()
-        ], { concurrency: "unbounded" })
+        ], { concurrency: 3 })
 
         // Batch process embeddings
         const allTexts = [
           ...users.map((user) =>
-            `User: ${user.name}, Email: ${user.email}, Role: ${user.role}, Department: ${user.department}`
+            `User ID: ${user.id}, User: ${user.name}, User Email: ${user.email}, User Role: ${user.role}, User Department: ${user.department}`
           ),
           ...orders.map((order) =>
-            `Order #${order.id}: ${order.description}, Amount: $${order.amount}, Status: ${order.status}, Customer ID: ${order.customer_id}, Created: ${
+            `Order ID: ${order.id}, Order Description: ${order.description}, Order Status: ${order.status}, Order Customer ID: ${order.customer_id}, Order Amount: $${order.amount}, Created: ${
               order.created_at.toISOString().split("T")[0]
             }`
           ),
           ...products.map((product) =>
-            `Product: ${product.name}, Category: ${product.category}, Price: $${product.price}, Description: ${product.description}`
+            `Product ID: ${product.id}, Product Description: ${product.description}, Product Name: ${product.name}, Product Category: ${product.category}, Product Price: $${product.price}`
           )
         ]
 
@@ -250,7 +249,7 @@ Question: ${question}`
     const enhancedSemanticSearch = (question: string) =>
       Effect.gen(function*() {
         // Generate multiple query variations for better search
-        const queryVariations = yield* generateQueryVariations(question)
+        const queryVariations = [...yield* generateQueryVariations(question), question]
 
         const allResults = yield* Effect.all(
           queryVariations.map((variation) =>
@@ -262,7 +261,10 @@ Question: ${question}`
                 Effect.catchTag("MalformedOutput", Effect.die),
                 Effect.catchTag("UnknownError", Effect.die)
               )
-              return yield* vectorOps.semanticSearch(embedding, { limit: 3 })
+              return yield* vectorOps.semanticSearch(
+                embedding,
+                { limit: 3, similarityThreshold: 0.3 }
+              )
             })
           ),
           { concurrency: "unbounded" }
