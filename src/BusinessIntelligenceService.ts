@@ -1,23 +1,8 @@
-import { Effect, Schema } from "effect"
-import { MockDatabaseService, type Order, type Product, type User } from "./MockDatabaseService.js"
+import { Effect } from "effect"
+import { AIServiceError, BusinessLogicError, DatabaseError } from "./Errors.js"
+import { MockDatabaseService } from "./MockDatabaseService.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
-
-export const BusinessInsight = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  description: Schema.String,
-  metrics: Schema.Array(Schema.Struct({
-    label: Schema.String,
-    value: Schema.Number,
-    change: Schema.optional(Schema.Number),
-    unit: Schema.optional(Schema.String)
-  })),
-  visualization: Schema.Literal("bar", "line", "pie", "table", "metric"),
-  data: Schema.Array(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-  recommendations: Schema.Array(Schema.String),
-  severity: Schema.Literal("high", "medium", "low", "info")
-})
-export type BusinessInsight = typeof BusinessInsight.Type
+import type { BusinessInsight, Order, Product, User } from "./Schemas.js"
 
 export class BusinessIntelligenceService
   extends Effect.Service<BusinessIntelligenceService>()("BusinessIntelligenceService", {
@@ -29,8 +14,22 @@ export class BusinessIntelligenceService
       const getKPIDashboard = () =>
         Effect.gen(function*() {
           const [users, orders] = yield* Effect.all([
-            db.getUsers(),
-            db.getOrders()
+            db.getUsers().pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch users for KPI dashboard",
+                  cause: error
+                })
+              )
+            ),
+            db.getOrders().pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch orders for KPI dashboard",
+                  cause: error
+                })
+              )
+            )
           ], { concurrency: 2 })
 
           // Calculate key metrics
@@ -55,18 +54,60 @@ export class BusinessIntelligenceService
               conversionRate: Math.round(conversionRate * 100) / 100
             },
             anomalies: recentLargeOrders,
-            trends: yield* analyzeBusinessTrends(orders, users)
+            trends: yield* analyzeBusinessTrends(orders, users).pipe(
+              Effect.mapError((error) =>
+                new BusinessLogicError({
+                  message: "Failed to analyze business trends for dashboard",
+                  cause: error
+                })
+              )
+            )
           }
         })
 
       // 2. Natural Language Query to Dashboard
       const naturalLanguageToDashboard = (query: string) =>
         Effect.gen(function*() {
-          const visualizationType = yield* determineVisualizationType(query)
-          const analysis = yield* qaService.getQuestionAnalysis(query)
-          const data = yield* executeAnalyticalQuery(analysis)
-          const insights = yield* generateDataInsights(data, query)
-          const suggestedActions = yield* generateRecommendedActions(insights)
+          const visualizationType = yield* determineVisualizationType(query).pipe(
+            Effect.mapError((error) =>
+              new BusinessLogicError({
+                message: "Failed to determine visualization type",
+                cause: error
+              })
+            )
+          )
+          const analysis = yield* qaService.getQuestionAnalysis(query).pipe(
+            Effect.mapError((error) =>
+              new AIServiceError({
+                message: "Failed to analyze natural language query",
+                cause: error
+              })
+            )
+          )
+          const data = yield* executeAnalyticalQuery(analysis).pipe(
+            Effect.mapError((error) =>
+              new DatabaseError({
+                message: "Failed to execute analytical query",
+                cause: error
+              })
+            )
+          )
+          const insights = yield* generateDataInsights(data, query).pipe(
+            Effect.mapError((error) =>
+              new AIServiceError({
+                message: "Failed to generate data insights from analytical query",
+                cause: error
+              })
+            )
+          )
+          const suggestedActions = yield* generateRecommendedActions(insights).pipe(
+            Effect.mapError((error) =>
+              new AIServiceError({
+                message: "Failed to generate recommended actions",
+                cause: error
+              })
+            )
+          )
 
           return {
             query,
@@ -104,8 +145,22 @@ export class BusinessIntelligenceService
       const segmentCustomers = () =>
         Effect.gen(function*() {
           const [users, orders] = yield* Effect.all([
-            db.getUsers(),
-            db.getOrders()
+            db.getUsers().pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch users for customer segmentation",
+                  cause: error
+                })
+              )
+            ),
+            db.getOrders().pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch orders for customer segmentation",
+                  cause: error
+                })
+              )
+            )
           ], { concurrency: 2 })
 
           const customerSegments = users.map((user) => {
@@ -137,7 +192,14 @@ export class BusinessIntelligenceService
           return {
             segments: groupedSegments,
             statistics: segmentStats,
-            recommendations: yield* generateSegmentRecommendations(segmentStats)
+            recommendations: yield* generateSegmentRecommendations(segmentStats).pipe(
+              Effect.mapError((error) =>
+                new AIServiceError({
+                  message: "Failed to generate segment recommendations",
+                  cause: error
+                })
+              )
+            )
           }
         })
 
@@ -147,7 +209,14 @@ export class BusinessIntelligenceService
             getKPIDashboard(),
             segmentCustomers(),
             predictSalesTrends()
-          ], { concurrency: 3 })
+          ], { concurrency: 3 }).pipe(
+            Effect.mapError((error) =>
+              new BusinessLogicError({
+                message: "Failed to generate business insights from multiple sources",
+                cause: error
+              })
+            )
+          )
 
           const insights: Array<BusinessInsight> = []
 
@@ -281,6 +350,13 @@ export class BusinessIntelligenceService
           `Analyze this business data and provide 3 key insights. Data sample: ${
             JSON.stringify(data.slice(0, 5))
           }. Original question: ${originalQuery}. Keep insights concise.`
+        ).pipe(
+          Effect.mapError((error) =>
+            new AIServiceError({
+              message: "Failed to generate data insights",
+              cause: error
+            })
+          )
         )
 
       const generateRecommendedActions = (insights: string) =>

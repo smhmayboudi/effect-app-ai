@@ -1,34 +1,6 @@
-import { Schema } from "@effect/schema"
 import { Effect } from "effect"
-
-// Define schemas for our data models
-export const User = Schema.Struct({
-  id: Schema.Number,
-  name: Schema.String,
-  email: Schema.String,
-  role: Schema.String,
-  department: Schema.String
-})
-export type User = typeof User.Type
-
-export const Order = Schema.Struct({
-  id: Schema.Number,
-  customer_id: Schema.Number,
-  description: Schema.String,
-  amount: Schema.Number,
-  status: Schema.String,
-  created_at: Schema.Date
-})
-export type Order = typeof Order.Type
-
-export const Product = Schema.Struct({
-  id: Schema.Number,
-  name: Schema.String,
-  category: Schema.String,
-  price: Schema.Number,
-  description: Schema.String
-})
-export type Product = typeof Product.Type
+import { DatabaseError } from "./Errors.js"
+import type { Order, Product, User } from "./Schemas.js"
 
 // Mock data
 const mockUsers: Array<User> = [
@@ -104,22 +76,29 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         // Simulate async database call
         yield* Effect.sleep("1 millis")
 
-        let users = [...mockUsers]
+        try {
+          let users = [...mockUsers]
 
-        if (filters?.ids) {
-          const numericIds = filters.ids.map((id) => parseInt(id))
-          users = users.filter((user) => numericIds.includes(user.id))
+          if (filters?.ids) {
+            const numericIds = filters.ids.map((id) => parseInt(id))
+            users = users.filter((user) => numericIds.includes(user.id))
+          }
+
+          if (filters?.role) {
+            users = users.filter((user) => user.role === filters.role)
+          }
+
+          if (filters?.department) {
+            users = users.filter((user) => user.department === filters.department)
+          }
+
+          return users
+        } catch (error) {
+          throw new DatabaseError({
+            message: "Failed to get users from database",
+            cause: error
+          })
         }
-
-        if (filters?.role) {
-          users = users.filter((user) => user.role === filters.role)
-        }
-
-        if (filters?.department) {
-          users = users.filter((user) => user.department === filters.department)
-        }
-
-        return users
       }),
 
     getOrders: (filters?: { ids?: Array<string>; customer_id?: number; status?: string }) =>
@@ -127,22 +106,29 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         // Simulate async database call
         yield* Effect.sleep("1 millis")
 
-        let orders = [...mockOrders]
+        try {
+          let orders = [...mockOrders]
 
-        if (filters?.ids) {
-          const numericIds = filters.ids.map((id) => parseInt(id))
-          orders = orders.filter((order) => numericIds.includes(order.id))
+          if (filters?.ids) {
+            const numericIds = filters.ids.map((id) => parseInt(id))
+            orders = orders.filter((order) => numericIds.includes(order.id))
+          }
+
+          if (filters?.customer_id) {
+            orders = orders.filter((order) => order.customer_id === filters.customer_id)
+          }
+
+          if (filters?.status) {
+            orders = orders.filter((order) => order.status === filters.status)
+          }
+
+          return orders
+        } catch (error) {
+          throw new DatabaseError({
+            message: "Failed to get orders from database",
+            cause: error
+          })
         }
-
-        if (filters?.customer_id) {
-          orders = orders.filter((order) => order.customer_id === filters.customer_id)
-        }
-
-        if (filters?.status) {
-          orders = orders.filter((order) => order.status === filters.status)
-        }
-
-        return orders
       }),
 
     getProducts: (filters?: { ids?: Array<string>; category?: string }) =>
@@ -150,18 +136,25 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         // Simulate async database call
         yield* Effect.sleep("1 millis")
 
-        let products = [...mockProducts]
+        try {
+          let products = [...mockProducts]
 
-        if (filters?.ids) {
-          const numericIds = filters.ids.map((id) => parseInt(id))
-          products = products.filter((product) => numericIds.includes(product.id))
+          if (filters?.ids) {
+            const numericIds = filters.ids.map((id) => parseInt(id))
+            products = products.filter((product) => numericIds.includes(product.id))
+          }
+
+          if (filters?.category) {
+            products = products.filter((product) => product.category === filters.category)
+          }
+
+          return products
+        } catch (error) {
+          throw new DatabaseError({
+            message: "Failed to get products from database",
+            cause: error
+          })
         }
-
-        if (filters?.category) {
-          products = products.filter((product) => product.category === filters.category)
-        }
-
-        return products
       }),
 
     getUserStats: (userId: number) =>
@@ -169,11 +162,18 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         // Simulate async database call
         yield* Effect.sleep("1 millis")
 
-        const userOrders = mockOrders.filter((order) => order.customer_id === userId)
-        const total_orders = userOrders.length
-        const total_spent = userOrders.reduce((sum, order) => sum + order.amount, 0)
+        try {
+          const userOrders = mockOrders.filter((order) => order.customer_id === userId)
+          const total_orders = userOrders.length
+          const total_spent = userOrders.reduce((sum, order) => sum + order.amount, 0)
 
-        return { total_orders, total_spent }
+          return { total_orders, total_spent }
+        } catch (error) {
+          throw new DatabaseError({
+            message: `Failed to get user stats for user ID: ${userId}`,
+            cause: error
+          })
+        }
       })
   })
 }) {}

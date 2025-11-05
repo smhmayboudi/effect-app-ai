@@ -3,6 +3,8 @@ import { Config, Effect, Layer, pipe } from "effect"
 import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel } from "@effect/ai-openai"
 import { NodeHttpClient } from "@effect/platform-node"
 import { BusinessIntelligenceService } from "./BusinessIntelligenceService.js"
+import { AIServiceError, BusinessLogicError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
+import { LoggerLive } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
 import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
@@ -15,11 +17,71 @@ const biDemoProgram = Effect.gen(function*() {
   console.log("📈 Business Intelligence Demo Starting...")
 
   // Sync data first
-  yield* qaService.syncDataToVectorStore()
+  yield* qaService.syncDataToVectorStore().pipe(
+    Effect.catchAll((error) => {
+      if (error instanceof DatabaseError) {
+        console.error("Database error during data sync:", error.message)
+        return Effect.die(error)
+      } else if (error instanceof EmbeddingError) {
+        console.error("Embedding error during data sync:", error.message)
+        return Effect.die(error)
+      } else if (error instanceof VectorStoreError) {
+        console.error("Vector store error during data sync:", error.message)
+        return Effect.die(error)
+      }
+      console.error("Unexpected error during data sync:", error)
+      return Effect.die(error)
+    })
+  )
 
   // 1. Get comprehensive dashboard
   console.log("📊 Generating KPI Dashboard...")
-  const dashboard = yield* biService.getKPIDashboard()
+  const dashboard = yield* biService.getKPIDashboard().pipe(
+    Effect.catchAll((error) => {
+      if (error instanceof DatabaseError) {
+        console.error("Database error getting KPI dashboard:", error.message)
+        return Effect.succeed({
+          overview: {
+            totalRevenue: 0,
+            totalUsers: 0,
+            totalOrders: 0,
+            completedOrders: 0,
+            averageOrderValue: 0,
+            conversionRate: 0
+          },
+          anomalies: [],
+          trends: "Error occurred while generating trends"
+        })
+      } else if (error instanceof BusinessLogicError) {
+        console.error("Business logic error getting KPI dashboard:", error.message)
+        return Effect.succeed({
+          overview: {
+            totalRevenue: 0,
+            totalUsers: 0,
+            totalOrders: 0,
+            completedOrders: 0,
+            averageOrderValue: 0,
+            conversionRate: 0
+          },
+          anomalies: [],
+          trends: "Error occurred while generating trends"
+        })
+      }
+      console.error("Unexpected error getting KPI dashboard:", error)
+      return Effect.succeed({
+        overview: {
+          totalRevenue: 0,
+          totalUsers: 0,
+          totalOrders: 0,
+          completedOrders: 0,
+          averageOrderValue: 0,
+          conversionRate: 0
+        },
+        anomalies: [],
+        trends: "Error occurred while generating trends"
+      })
+    })
+  )
   console.log("Dashboard Overview:", dashboard.overview)
 
   // 2. Natural language queries to insights
@@ -32,19 +94,79 @@ const biDemoProgram = Effect.gen(function*() {
 
   for (const query of nlQueries) {
     console.log(`\n🗣️  NL Query: "${query}"`)
-    const result = yield* biService.naturalLanguageToDashboard(query)
+    const result = yield* biService.naturalLanguageToDashboard(query).pipe(
+      Effect.catchAll((error) => {
+        if (error instanceof AIServiceError) {
+          console.error(`AI service error for query "${query}":`, error.message)
+          return Effect.succeed({
+            query,
+            visualizationType: "table",
+            data: [],
+            insights: "Error occurred while processing query",
+            suggestedActions: ["Retry the query or check the data source"]
+          })
+        } else if (error instanceof BusinessLogicError) {
+          console.error(`Business logic error for query "${query}":`, error.message)
+          return Effect.succeed({
+            query,
+            visualizationType: "table",
+            data: [],
+            insights: "Error occurred while processing query",
+            suggestedActions: ["Retry the query or check the data source"]
+          })
+        } else if (error instanceof DatabaseError) {
+          console.error(`Database error for query "${query}":`, error.message)
+          return Effect.succeed({
+            query,
+            visualizationType: "table",
+            data: [],
+            insights: "Error occurred while processing query",
+            suggestedActions: ["Retry the query or check the data source"]
+          })
+        }
+        console.error(`Unexpected error for query "${query}":`, error)
+        return Effect.succeed({
+          query,
+          visualizationType: "table",
+          data: [],
+          insights: "Error occurred while processing query",
+          suggestedActions: ["Retry the query or check the data source"]
+        })
+      })
+    )
     console.log(`📈 Visualization Type: ${result.visualizationType}`)
     console.log(`💡 Insights: ${result.insights}`)
   }
 
   // 3. Customer segmentation
   console.log("\n👥 Analyzing Customer Segments...")
-  const segments = yield* biService.segmentCustomers()
+  const segments = yield* biService.segmentCustomers().pipe(
+    Effect.catchAll((error) => {
+      if (error instanceof AIServiceError) {
+        console.error("AI seervice error during customer segmentation:", error.message)
+        return Effect.succeed({ segments: {}, statistics: {}, recommendations: [] })
+      } else if (error instanceof DatabaseError) {
+        console.error("Database error during customer segmentation:", error.message)
+        return Effect.succeed({ segments: {}, statistics: {}, recommendations: [] })
+      }
+      console.error("Unexpected error during customer segmentation:", error)
+      return Effect.succeed({ segments: {}, statistics: {}, recommendations: [] })
+    })
+  )
   console.log("Customer Segments:", Object.keys(segments.segments))
 
   // 4. Automated insights
   console.log("\n🔍 Generating Automated Business Insights...")
-  const insights = yield* biService.generateBusinessInsights()
+  const insights = yield* biService.generateBusinessInsights().pipe(
+    Effect.catchAll((error) => {
+      if (error instanceof BusinessLogicError) {
+        console.error("Business logic error generating business insights:", error.message)
+        return Effect.succeed([])
+      }
+      console.error("Unexpected error generating business insights:", error)
+      return Effect.succeed([])
+    })
+  )
   insights.forEach((insight) => {
     console.log(`\n⚠️  ${insight.title} (${insight.severity})`)
     console.log(`   ${insight.description}`)
@@ -78,22 +200,24 @@ const AiLayers = Layer.mergeAll(
 )
 
 // Create the core application layers
-const CoreLayers = Layer.merge(
+const CoreLayers = Layer.mergeAll(
   MockDatabaseService.Default,
-  Layer.provideMerge(
-    PGLiteVectorOps.Default,
-    PGLiteVectorService.Default.pipe(Layer.provide(Layer.scope))
-  )
+  PGLiteVectorOps.Default.pipe(
+    Layer.provide(PGLiteVectorService.Default)
+  ),
+  LoggerLive
 )
 
-const AppLayer = Layer.provideMerge(
+const AppLayer = Layer.provide(
   PGLiteQAService.Default,
   CoreLayers
 )
 
 // Add to your layer configuration
 const BILayer = Layer.provideMerge(
-  BusinessIntelligenceService.Default,
+  BusinessIntelligenceService.Default.pipe(
+    Layer.provide(MockDatabaseService.Default)
+  ),
   AppLayer
 )
 

@@ -1,31 +1,7 @@
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
+import { VectorStoreError } from "./Errors.js"
 import { PGLiteVectorService } from "./PGLiteVectorService.js"
-
-export const In = Schema.Struct({
-  id: Schema.String,
-  content: Schema.String,
-  embedding: Schema.Array(Schema.Number),
-  type: Schema.Literal("order", "product", "user"),
-  entity_id: Schema.String,
-  metadata: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Any }),
-    { exact: true }
-  )
-})
-export type In = typeof In.Type
-
-export const Out = Schema.Struct({
-  id: Schema.String,
-  content: Schema.String,
-  type: Schema.Literal("order", "product", "user"),
-  entity_id: Schema.String,
-  metadata: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: Schema.Any }),
-    { exact: true }
-  ),
-  similarity: Schema.Number
-})
-export type Out = typeof Out.Type
+import type { EmbeddingInput, EmbeddingOutput } from "./Schemas.js"
 
 export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVectorOps", {
   effect: Effect.gen(function*() {
@@ -47,11 +23,26 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             [ids]
           )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: `Failed to calculate average embedding for ${ids.length} items`,
+              cause: error
+            })
+          )
+        )
 
-        const resultRows = result.rows.map((row) => ({
-          avg_embedding: JSON.parse(row.avg_embedding) as Array<number>
-        }))
+        const resultRows = yield* Effect.try({
+          try: () =>
+            result.rows.map((row) => ({
+              avg_embedding: JSON.parse(row.avg_embedding) as Array<number>
+            })),
+          catch: (error) =>
+            new VectorStoreError({
+              message: "Failed to parse average embedding result",
+              cause: error
+            })
+        })
 
         return resultRows
       })
@@ -64,7 +55,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         const { limit = 5 } = options || {}
 
         const result = yield* Effect.tryPromise(() =>
-          pglite.db.query<Out>(
+          pglite.db.query<EmbeddingOutput>(
             `
               WITH target AS (
                 SELECT embedding FROM embeddings WHERE id = $1
@@ -108,7 +99,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         params.push(limit)
 
         const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<Out>(
+          pglite.db.query<EmbeddingOutput>(
             `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity
               FROM embeddings
               WHERE ${whereConditions.join(" AND ")} AND (1 - (embedding <=> $1)) >= $2
@@ -117,7 +108,14 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             params
           )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to perform hybrid search",
+              cause: error
+            })
+          )
+        )
 
         return results.rows
       })
@@ -148,7 +146,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         params.push(limit)
 
         const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<Out>(
+          pglite.db.query<EmbeddingOutput>(
             `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity
               FROM embeddings
               WHERE ${whereConditions.join(" AND ")} AND (1 - (embedding <=> $1)) >= $2
@@ -157,12 +155,19 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             params
           )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to perform semantic search",
+              cause: error
+            })
+          )
+        )
 
         return results.rows
       })
 
-    const storeEmbedding = (data: In) =>
+    const storeEmbedding = (data: EmbeddingInput) =>
       Effect.tryPromise(() =>
         pglite.db.query<void>(
           `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
@@ -182,10 +187,17 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             JSON.stringify(data.metadata || {})
           ]
         )
-      ).pipe(Effect.catchTag("UnknownException", Effect.die))
+      ).pipe(
+        Effect.mapError((error) =>
+          new VectorStoreError({
+            message: `Failed to store embedding with ID: ${data.id}`,
+            cause: error
+          })
+        )
+      )
 
     // Advanced vector operations
-    const storeEmbeddingBatch = (items: Array<In>) =>
+    const storeEmbeddingBatch = (items: Array<EmbeddingInput>) =>
       Effect.tryPromise(() =>
         pglite.db.query<void>(
           `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
@@ -209,7 +221,14 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             JSON.stringify(item.metadata || {})
           ])
         )
-      ).pipe(Effect.catchTag("UnknownException", Effect.die))
+      ).pipe(
+        Effect.mapError((error) =>
+          new VectorStoreError({
+            message: `Failed to store batch of ${items.length} embeddings`,
+            cause: error
+          })
+        )
+      )
 
     // Enhanced semantic search with multiple distance metrics
     const multiMetricSearch = (queryEmbedding: Array<number>, options?: {
@@ -228,7 +247,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         const distanceOp = distanceFunctions[metric]
 
         const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<Out & { distance: number }>(
+          pglite.db.query<EmbeddingOutput & { distance: number }>(
             `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity, (embedding ${distanceOp} $1) as distance
               FROM embeddings
               ORDER BY embedding ${distanceOp} $1
@@ -236,7 +255,14 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             [formatEmbedding(queryEmbedding), limit]
           )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: `Failed to perform multi-metric search with ${metric} distance`,
+              cause: error
+            })
+          )
+        )
 
         return results.rows
       })
@@ -253,13 +279,27 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           pglite.db.query<{ centroid: string }>(
             `SELECT AVG(embedding) as centroid FROM embeddings`
           )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to calculate centroid for anomaly detection",
+              cause: error
+            })
+          )
+        )
 
-        const centroid = JSON.parse(centroidResult.rows[0].centroid)
+        const centroid = yield* Effect.try({
+          try: () => JSON.parse(centroidResult.rows[0].centroid) as Array<number>,
+          catch: (error) =>
+            new VectorStoreError({
+              message: "Failed to parse centroid for anomaly detection",
+              cause: error
+            })
+        })
 
         // Find items far from centroid (L2 distance)
         const anomalies = yield* Effect.tryPromise(() =>
-          pglite.db.query<Out & { distance: number }>(
+          pglite.db.query<EmbeddingOutput & { distance: number }>(
             `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity, (embedding <-> $1) as distance
               FROM embeddings
               WHERE (embedding <-> $1) > $2
@@ -268,7 +308,14 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             `,
             [formatEmbedding(centroid), threshold, limit]
           )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to detect anomalies in vector store",
+              cause: error
+            })
+          )
+        )
 
         return anomalies.rows
       })
@@ -281,20 +328,37 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
 
         const segmentCentroids = yield* Effect.all(
           segments.map((segment) =>
-            Effect.tryPromise(() =>
-              pglite.db.query<{ centroid: string }>(
-                `SELECT AVG(embedding) as centroid 
-                  FROM embeddings e
-                  JOIN users u ON e.entity_id = u.id::text
-                  WHERE e.type = 'user' 
-                  AND u.segment = $1
-                `,
-                [segment]
-              ).then((result) => ({
-                segment,
-                centroid: result.rows[0] ? JSON.parse(result.rows[0].centroid) : null
-              }))
-            ).pipe(Effect.catchTag("UnknownException", Effect.die))
+            Effect.gen(function*() {
+              const result = yield* Effect.tryPromise(() =>
+                pglite.db.query<{ centroid: string }>(
+                  `SELECT AVG(embedding) as centroid 
+                    FROM embeddings e
+                    JOIN users u ON e.entity_id = u.id::text
+                    WHERE e.type = 'user' 
+                    AND u.segment = $1
+                  `,
+                  [segment]
+                )
+              ).pipe(
+                Effect.mapError((error) =>
+                  new VectorStoreError({
+                    message: `Failed to calculate centroid for segment: ${segment}`,
+                    cause: error
+                  })
+                )
+              )
+
+              const centroid = yield* Effect.try({
+                try: () => result.rows[0] ? JSON.parse(result.rows[0].centroid) as Array<number> : null,
+                catch: (error) =>
+                  new VectorStoreError({
+                    message: `Failed to parse centroid for segment: ${segment}`,
+                    cause: error
+                  })
+              })
+
+              return { segment, centroid }
+            })
           ),
           { concurrency: 4 }
         )
@@ -317,6 +381,13 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
               WHERE e.type = 'user'
               QUALIFY ROW_NUMBER() OVER (PARTITION BY e.entity_id ORDER BY e.embedding <=> c.centroid) = 1
             `
+          )
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to perform cluster analysis",
+              cause: error
+            })
           )
         )
 
@@ -342,7 +413,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         const ids = broadResults.map((r) => r.id)
 
         const rerankedResults = yield* Effect.tryPromise(() =>
-          pglite.db.query<Out & { cosine_score: number; l2_score: number; combined_score: number }>(
+          pglite.db.query<EmbeddingOutput & { cosine_score: number; l2_score: number; combined_score: number }>(
             `SELECT 
                 id, content, type, entity_id, metadata,
                 1 - (embedding <=> $1) as cosine_score,
@@ -354,6 +425,13 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
               LIMIT 10
             `,
             [formattedEmbedding, ids]
+          )
+        ).pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to perform advanced semantic search",
+              cause: error
+            })
           )
         )
 

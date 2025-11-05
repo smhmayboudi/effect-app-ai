@@ -6,6 +6,7 @@ import { Effect } from "effect"
 export class PGLiteVectorService extends Effect.Service<PGLiteVectorService>()(
   "PGLiteVectorService",
   {
+    dependencies: [],
     scoped: Effect.gen(function*() {
       // Create database resource with acquireRelease
       const db = yield* Effect.acquireRelease(
