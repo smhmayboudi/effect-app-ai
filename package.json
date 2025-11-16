@@ -30,8 +30,10 @@
   "dependencies": {
     "@effect/ai": "latest",
     "@effect/ai-openai": "latest",
+    "@effect/experimental": "latest",
     "@effect/platform-node": "latest",
     "@effect/schema": "latest",
+    "@effect/sql": "latest",
     "@electric-sql/pglite": "^0.3.11",
     "effect": "latest"
   },
