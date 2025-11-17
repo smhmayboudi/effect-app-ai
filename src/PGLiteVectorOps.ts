@@ -1,29 +1,18 @@
+import { SqlClient } from "@effect/sql"
 import { Effect } from "effect"
 import { VectorStoreError } from "./Errors.js"
-import { PGLiteVectorService } from "./PGLiteVectorService.js"
 import type { EmbeddingInput, EmbeddingOutput } from "./Schemas.js"
 
 export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVectorOps", {
   effect: Effect.gen(function*() {
-    const pglite = yield* PGLiteVectorService
-
-    // Helper function to format embeddings for PGLite
-    const formatEmbedding = (embedding: ReadonlyArray<number>): string => {
-      return `[${embedding.join(",")}]`
-    }
+    const sql = yield* SqlClient.SqlClient
 
     // Average embedding for a set of items
     const averageEmbedding = (ids: Array<string>) =>
       Effect.gen(function*() {
-        const result = yield* Effect.tryPromise(() =>
-          pglite.db.query<{ avg_embedding: string }>(
-            `SELECT AVG(embedding) as avg_embedding
-              FROM embeddings 
-              WHERE id = ANY($1)
-            `,
-            [ids]
-          )
-        ).pipe(
+        const result = yield* sql<
+          { avg_embedding: string }
+        >`SELECT AVG(embedding) as avg_embedding FROM embeddings WHERE id = ANY(${ids})`.pipe(
           Effect.mapError((error) =>
             new VectorStoreError({
               message: `Failed to calculate average embedding for ${ids.length} items`,
@@ -32,19 +21,14 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           )
         )
 
-        const resultRows = yield* Effect.try({
-          try: () =>
-            result.rows.map((row) => ({
-              avg_embedding: JSON.parse(row.avg_embedding) as Array<number>
-            })),
+        return yield* Effect.try({
+          try: () => result[0] ? JSON.parse(result[0].avg_embedding) as Array<number> : [],
           catch: (error) =>
             new VectorStoreError({
               message: "Failed to parse average embedding result",
               cause: error
             })
         })
-
-        return resultRows
       })
 
     // Find similar items to a given item
@@ -54,23 +38,9 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       Effect.gen(function*() {
         const { limit = 5 } = options || {}
 
-        const result = yield* Effect.tryPromise(() =>
-          pglite.db.query<EmbeddingOutput>(
-            `
-              WITH target AS (
-                SELECT embedding FROM embeddings WHERE id = $1
-              )
-              SELECT e.id, e.content, e.type, e.entity_id, e.metadata, 1 - (e.embedding <=> t.embedding) as similarity
-                FROM embeddings e, target t
-                WHERE e.id != $1
-                ORDER BY e.embedding <=> t.embedding
-                LIMIT $2
-            `,
-            [itemId, limit]
-          )
-        ).pipe(Effect.catchTag("UnknownException", Effect.die))
-
-        return result.rows
+        return yield* sql<
+          EmbeddingOutput
+        >`WITH target AS (SELECT embedding FROM embeddings WHERE id = ${itemId}) SELECT e.id, e.content, e.type, e.entity_id, e.metadata, 1 - (e.embedding <=> t.embedding) as similarity FROM embeddings e, target t WHERE e.id != ${itemId} ORDER BY e.embedding <=> t.embedding LIMIT ${limit}`
       })
 
     const hybridSearch = (query: string, queryEmbedding: Array<number>, options?: {
@@ -80,44 +50,28 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
     }) =>
       Effect.gen(function*() {
         const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
-
-        // Format the query embedding for PGLite
-        const formattedEmbedding = formatEmbedding(queryEmbedding)
-        const params: Array<any> = [formattedEmbedding, similarityThreshold]
+        const formattedEmbedding = JSON.stringify(queryEmbedding)
         const whereConditions = ["1 <= 2"]
-
         if (filters.type) {
-          params.push(filters.type)
-          whereConditions.push(`type = $${params.length}`)
+          whereConditions.push(`type = '${filters.type}'`)
         }
-
         if (query) {
-          params.push(`%${query}%`)
-          whereConditions.push(`content ILIKE $${params.length}`)
+          whereConditions.push(`content ILIKE '%${query}%'`)
         }
 
-        params.push(limit)
-
-        const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<EmbeddingOutput>(
-            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity
-              FROM embeddings
-              WHERE ${whereConditions.join(" AND ")} AND (1 - (embedding <=> $1)) >= $2
-              ORDER BY embedding <=> $1
-              LIMIT $${params.length}
-            `,
-            params
+        return yield* sql<
+          EmbeddingOutput
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity FROM embeddings WHERE ${
+          sql.unsafe(whereConditions.join(" AND "))
+        } AND (1 - (embedding <=> ${formattedEmbedding})) >= ${similarityThreshold} ORDER BY embedding <=> ${formattedEmbedding} LIMIT ${limit}`
+          .pipe(
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: "Failed to perform hybrid search",
+                cause: error
+              })
+            )
           )
-        ).pipe(
-          Effect.mapError((error) =>
-            new VectorStoreError({
-              message: "Failed to perform hybrid search",
-              cause: error
-            })
-          )
-        )
-
-        return results.rows
       })
 
     const semanticSearch = (queryEmbedding: Array<number>, options?: {
@@ -127,144 +81,94 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
     }) =>
       Effect.gen(function*() {
         const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
-
-        // Format the query embedding for PGLite
-        const formattedEmbedding = formatEmbedding(queryEmbedding)
-        const params: Array<any> = [formattedEmbedding, similarityThreshold]
+        const formattedEmbedding = JSON.stringify(queryEmbedding)
         const whereConditions = ["1 <= 2"]
-
         if (filters.type) {
-          params.push(filters.type)
-          whereConditions.push(`type = $${params.length}`)
+          whereConditions.push(`type = '${filters.type}'`)
         }
-
         if (filters.entity_id) {
-          params.push(filters.entity_id)
-          whereConditions.push(`entity_id = $${params.length}`)
+          whereConditions.push(`entity_id = '${filters.entity_id}'`)
         }
 
-        params.push(limit)
-
-        const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<EmbeddingOutput>(
-            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity
-              FROM embeddings
-              WHERE ${whereConditions.join(" AND ")} AND (1 - (embedding <=> $1)) >= $2
-              ORDER BY embedding <=> $1
-              LIMIT $${params.length}
-            `,
-            params
+        return yield* sql<
+          EmbeddingOutput
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity FROM embeddings WHERE ${
+          sql.unsafe(whereConditions.join(" AND "))
+        } AND (1 - (embedding <=> ${formattedEmbedding})) >= ${similarityThreshold} ORDER BY embedding <=> ${formattedEmbedding} LIMIT ${limit}`
+          .pipe(
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: "Failed to perform semantic search",
+                cause: error
+              })
+            )
           )
-        ).pipe(
+      })
+
+    const storeEmbedding = (data: EmbeddingInput) =>
+      sql`INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata) VALUES (${data.id}, ${data.content}, ${
+        JSON.stringify(data.embedding)
+      }, ${data.type}, ${data.entity_id}, ${
+        JSON.stringify(data.metadata || {})
+      }) ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, created_at = NOW()`
+        .pipe(
           Effect.mapError((error) =>
             new VectorStoreError({
-              message: "Failed to perform semantic search",
+              message: `Failed to store embedding with ID: ${data.id}`,
               cause: error
             })
           )
         )
 
-        return results.rows
-      })
-
-    const storeEmbedding = (data: EmbeddingInput) =>
-      Effect.tryPromise(() =>
-        pglite.db.query<void>(
-          `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (id) DO UPDATE SET
-              content = EXCLUDED.content,
-              embedding = EXCLUDED.embedding,
-              metadata = EXCLUDED.metadata,
-              created_at = NOW()
-          `,
-          [
-            data.id,
-            data.content,
-            formatEmbedding(data.embedding),
-            data.type,
-            data.entity_id,
-            JSON.stringify(data.metadata || {})
-          ]
-        )
-      ).pipe(
-        Effect.mapError((error) =>
-          new VectorStoreError({
-            message: `Failed to store embedding with ID: ${data.id}`,
-            cause: error
-          })
-        )
-      )
-
     // Advanced vector operations
     const storeEmbeddingBatch = (items: Array<EmbeddingInput>) =>
-      Effect.tryPromise(() =>
-        pglite.db.query<void>(
-          `INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata)
-            VALUES ${
-            items.map((_, i) =>
-              `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
-            ).join(", ")
-          }
-          ON CONFLICT (id) DO UPDATE SET
-            content = EXCLUDED.content,
-            embedding = EXCLUDED.embedding,
-            metadata = EXCLUDED.metadata,
-            created_at = NOW()
-        `,
-          items.flatMap((item) => [
-            item.id,
-            item.content,
-            formatEmbedding(item.embedding),
-            item.type,
-            item.entity_id,
-            JSON.stringify(item.metadata || {})
-          ])
+      sql`INSERT INTO embeddings (id, content, embedding, type, entity_id, metadata) VALUES ${
+        sql.unsafe(
+          items.map((item) =>
+            `('${item.id}', '${item.content}', '${
+              JSON.stringify(item.embedding)
+            }', '${item.type}', '${item.entity_id}', '${JSON.stringify(item.metadata || {})}')`
+          ).join(", ")
         )
-      ).pipe(
-        Effect.mapError((error) =>
-          new VectorStoreError({
-            message: `Failed to store batch of ${items.length} embeddings`,
-            cause: error
-          })
+      } ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, created_at = NOW()`
+        .pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: `Failed to store batch of ${items.length} embeddings`,
+              cause: error
+            })
+          )
         )
-      )
 
     // Enhanced semantic search with multiple distance metrics
     const multiMetricSearch = (queryEmbedding: Array<number>, options?: {
       limit?: number
-      metric?: "cosine" | "l2" | "inner_product" | "l1"
+      // hamming, jaccard
+      metric?: "cosine" | "hamming" | "inner_product" | "jaccard" | "l1" | "l2"
     }) =>
       Effect.gen(function*() {
         const { limit = 10, metric = "cosine" } = options || {}
-
+        const formattedEmbedding = JSON.stringify(queryEmbedding)
         const distanceFunctions = {
           cosine: "<=>",
-          l2: "<->",
+          hamming: "<~>",
           inner_product: "<#>",
-          l1: "<+>"
-        }
+          jaccard: "<%>",
+          l1: "<+>",
+          l2: "<->"
+        } as const
         const distanceOp = distanceFunctions[metric]
-
-        const results = yield* Effect.tryPromise(() =>
-          pglite.db.query<EmbeddingOutput & { distance: number }>(
-            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity, (embedding ${distanceOp} $1) as distance
-              FROM embeddings
-              ORDER BY embedding ${distanceOp} $1
-              LIMIT $2
-            `,
-            [formatEmbedding(queryEmbedding), limit]
+        return yield* sql<
+          EmbeddingOutput & { distance: number }
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity, (embedding ${distanceOp} ${formattedEmbedding}) as distance FROM embeddings ORDER BY embedding ${distanceOp} ${formattedEmbedding} LIMIT ${limit}`
+          .pipe(
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: `Failed to perform multi-metric search with ${metric} distance`,
+                cause: error
+              })
+            )
           )
-        ).pipe(
-          Effect.mapError((error) =>
-            new VectorStoreError({
-              message: `Failed to perform multi-metric search with ${metric} distance`,
-              cause: error
-            })
-          )
-        )
-
-        return results.rows
       })
 
     // Detect outliers using L2 distance
@@ -273,83 +177,62 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
     }) =>
       Effect.gen(function*() {
         const { limit = 20 } = options || {}
-
         // Calculate centroid of all embeddings
-        const centroidResult = yield* Effect.tryPromise(() =>
-          pglite.db.query<{ centroid: string }>(
-            `SELECT AVG(embedding) as centroid FROM embeddings`
+        const result = yield* sql<{ centroid: string }>`SELECT AVG(embedding) as centroid FROM embeddings`
+          .pipe(
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: "Failed to calculate centroid for anomaly detection",
+                cause: error
+              })
+            )
           )
-        ).pipe(
-          Effect.mapError((error) =>
-            new VectorStoreError({
-              message: "Failed to calculate centroid for anomaly detection",
-              cause: error
-            })
-          )
-        )
-
         const centroid = yield* Effect.try({
-          try: () => JSON.parse(centroidResult.rows[0].centroid) as Array<number>,
+          try: () => result[0] ? JSON.parse(result[0].centroid) as Array<number> : [],
           catch: (error) =>
             new VectorStoreError({
               message: "Failed to parse centroid for anomaly detection",
               cause: error
             })
         })
-
         // Find items far from centroid (L2 distance)
-        const anomalies = yield* Effect.tryPromise(() =>
-          pglite.db.query<EmbeddingOutput & { distance: number }>(
-            `SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> $1) as similarity, (embedding <-> $1) as distance
-              FROM embeddings
-              WHERE (embedding <-> $1) > $2
-              ORDER BY distance DESC
-              LIMIT $3
-            `,
-            [formatEmbedding(centroid), threshold, limit]
-          )
-        ).pipe(
-          Effect.mapError((error) =>
-            new VectorStoreError({
-              message: "Failed to detect anomalies in vector store",
-              cause: error
-            })
-          )
-        )
+        const formattedEmbedding = JSON.stringify(centroid)
 
-        return anomalies.rows
+        return yield* sql<
+          EmbeddingOutput & { distance: number }
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity, (embedding <-> ${formattedEmbedding}) as distance FROM embeddings WHERE (embedding <-> ${formattedEmbedding}) > ${threshold} ORDER BY distance DESC LIMIT ${limit}`
+          .pipe(
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: "Failed to detect anomalies in vector store",
+                cause: error
+              })
+            )
+          )
       })
 
     // Cluster analysis using multiple distance metrics
     const clusterAnalysis = () =>
       Effect.gen(function*() {
         // Simple k-means like clustering using distance to centroids
-        const segments = ["champions", "loyal", "potential", "at-risk"]
+        const segments = ["champions", "loyal", "potential", "at-risk"] as const
 
         const segmentCentroids = yield* Effect.all(
           segments.map((segment) =>
             Effect.gen(function*() {
-              const result = yield* Effect.tryPromise(() =>
-                pglite.db.query<{ centroid: string }>(
-                  `SELECT AVG(embedding) as centroid 
-                    FROM embeddings e
-                    JOIN users u ON e.entity_id = u.id::text
-                    WHERE e.type = 'user' 
-                    AND u.segment = $1
-                  `,
-                  [segment]
+              const result = yield* sql<
+                { centroid: string }
+              >`SELECT AVG(embedding) as centroid FROM embeddings e JOIN users u ON e.entity_id = u.id::text WHERE e.type = 'user' AND u.segment = ${segment}`
+                .pipe(
+                  Effect.mapError((error) =>
+                    new VectorStoreError({
+                      message: `Failed to calculate centroid for segment: ${segment}`,
+                      cause: error
+                    })
+                  )
                 )
-              ).pipe(
-                Effect.mapError((error) =>
-                  new VectorStoreError({
-                    message: `Failed to calculate centroid for segment: ${segment}`,
-                    cause: error
-                  })
-                )
-              )
-
               const centroid = yield* Effect.try({
-                try: () => result.rows[0] ? JSON.parse(result.rows[0].centroid) as Array<number> : null,
+                try: () => result[0] ? JSON.parse(result[0].centroid) as Array<number> : [],
                 catch: (error) =>
                   new VectorStoreError({
                     message: `Failed to parse centroid for segment: ${segment}`,
@@ -360,38 +243,25 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
               return { segment, centroid }
             })
           ),
-          { concurrency: 4 }
+          { concurrency: "unbounded" }
         )
 
         // Find closest segments for each user
-        const userSegments = yield* Effect.tryPromise(() =>
-          pglite.db.query<{ user_id: string; segment: string; confidence: number }>(
-            `WITH centroids AS (
-              SELECT * FROM (VALUES 
-                ${
-              segmentCentroids.filter((sc) => sc.centroid).map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}::vector)`).join(
-                ", "
-              )
-            }
-              ) AS t(segment, centroid)
+        return yield* sql<
+          { user_id: string; segment: string; confidence: number }
+        >`WITH centroids AS (SELECT * FROM (VALUES ${
+          segmentCentroids.filter((sc) => sc.centroid).map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}::vector)`).join(
+            ", "
+          )
+        }) AS t(segment, centroid)) SELECT e.entity_id as user_id, c.segment, 1 - (e.embedding <=> c.centroid) as confidence FROM embeddings e CROSS JOIN centroids c WHERE e.type = 'user' QUALIFY ROW_NUMBER() OVER (PARTITION BY e.entity_id ORDER BY e.embedding <=> c.centroid) = 1`
+          .pipe(
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: "Failed to perform cluster analysis",
+                cause: error
+              })
             )
-            SELECT e.entity_id as user_id, c.segment, 1 - (e.embedding <=> c.centroid) as confidence
-              FROM embeddings e
-              CROSS JOIN centroids c
-              WHERE e.type = 'user'
-              QUALIFY ROW_NUMBER() OVER (PARTITION BY e.entity_id ORDER BY e.embedding <=> c.centroid) = 1
-            `
           )
-        ).pipe(
-          Effect.mapError((error) =>
-            new VectorStoreError({
-              message: "Failed to perform cluster analysis",
-              cause: error
-            })
-          )
-        )
-
-        return userSegments.rows
       })
 
     // Multi-stage search with different distance metrics
@@ -401,44 +271,28 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       similarityThreshold?: number
     }) =>
       Effect.gen(function*() {
+        const { limit = 10 } = options || {}
         // Stage 1: Broad search with cosine similarity
-        const broadResults = yield* semanticSearch(queryEmbedding, options)
-
+        const broadResults = yield* semanticSearch(queryEmbedding, { ...options, limit })
         if (broadResults.length === 0) {
           return []
         }
-
         // Stage 2: Re-rank using multiple distance metrics
-        const formattedEmbedding = formatEmbedding(queryEmbedding)
-        const ids = broadResults.map((r) => r.id)
+        const formattedEmbedding = JSON.stringify(queryEmbedding)
+        const ids = broadResults.map((row) => row.id)
 
-        const rerankedResults = yield* Effect.tryPromise(() =>
-          pglite.db.query<EmbeddingOutput & { cosine_score: number; l2_score: number; combined_score: number }>(
-            `SELECT 
-                id, content, type, entity_id, metadata,
-                1 - (embedding <=> $1) as cosine_score,
-                - (embedding <-> $1) as l2_score,  -- Negative because lower L2 is better
-                (1 - (embedding <=> $1)) * 0.7 + (- (embedding <-> $1)) * 0.3 as combined_score
-              FROM embeddings
-              WHERE id = ANY($2)
-              ORDER BY combined_score DESC
-              LIMIT 10
-            `,
-            [formattedEmbedding, ids]
+        return yield* sql<
+          EmbeddingOutput & { cosine_score: number; l2_score: number; combined_score: number }
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as cosine_score, -(embedding <-> ${formattedEmbedding}) as l2_score, (1 - (embedding <=> ${formattedEmbedding})) * 0.7 + (-(embedding <-> ${formattedEmbedding})) * 0.3 as combined_score FROM embeddings WHERE id = ANY(${ids}) ORDER BY combined_score DESC LIMIT ${limit}`
+          .pipe(
+            Effect.map((rows) => rows.map((row) => ({ ...row, similarity: row.combined_score }))),
+            Effect.mapError((error) =>
+              new VectorStoreError({
+                message: "Failed to perform advanced semantic search",
+                cause: error
+              })
+            )
           )
-        ).pipe(
-          Effect.mapError((error) =>
-            new VectorStoreError({
-              message: "Failed to perform advanced semantic search",
-              cause: error
-            })
-          )
-        )
-
-        return rerankedResults.rows.map((row) => ({
-          ...row,
-          similarity: row.combined_score
-        }))
       })
 
     return {

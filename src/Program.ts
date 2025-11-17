@@ -1,16 +1,19 @@
 import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel } from "@effect/ai-openai"
 import { NodeHttpClient } from "@effect/platform-node"
-import { Config, Layer, pipe } from "effect"
+import { SqlClient } from "@effect/sql"
+import { NodeFS } from "@electric-sql/pglite/nodefs"
+import { vector } from "@electric-sql/pglite/vector"
+import { Config, Layer, pipe, String } from "effect"
 import * as Effect from "effect/Effect"
 import { AIServiceError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
 import { LoggerLive } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
+import { PGliteClient } from "./PGlite/index.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
 import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
-import { PGLiteVectorService } from "./PGLiteVectorService.js"
 
 // Example program with real embeddings
-const realEmbeddingsProgram = Effect.gen(function*() {
+export const realEmbeddingsProgram = Effect.gen(function*() {
   const qaService = yield* PGLiteQAService
 
   console.log("📊 Initializing Q&A Service with Real Embeddings...")
@@ -129,12 +132,52 @@ const AiLayers = Layer.merge(
   LanguageModelLayer
 )
 
+// const Migrator = PGliteMigrator.layer({
+//   loader: PGliteMigrator.fromFileSystem(
+//     fileURLToPath(new URL("./migration/", import.meta.url))
+//   ),
+//   table: "tbl_sql_migration"
+// }).pipe(
+//   Layer.provide(NodeContext.layer)
+// )
+
+export const Migrator = Layer.effectDiscard(
+  Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`CREATE EXTENSION IF NOT EXISTS vector`
+    yield* sql`
+          CREATE TABLE IF NOT EXISTS embeddings (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            embedding VECTOR(1536),
+            type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            metadata JSONB,
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+  `
+    yield* sql`
+      CREATE INDEX IF NOT EXISTS embeddings_idx
+      ON embeddings
+      USING ivfflat (embedding vector_cosine_ops)
+      WITH (lists = 100)
+  `
+  })
+)
+
+const Client = PGliteClient.layer({
+  extensions: { vector },
+  fs: new NodeFS("./data/"),
+  transformQueryNames: String.camelToSnake,
+  transformResultNames: String.snakeToCamel
+})
+
+const Sql = Migrator.pipe(Layer.provideMerge(Client))
+
 // Create the core application layers
 const CoreLayers = Layer.mergeAll(
   MockDatabaseService.Default,
-  PGLiteVectorOps.Default.pipe(
-    Layer.provide(PGLiteVectorService.Default)
-  ),
+  PGLiteVectorOps.Default.pipe(Layer.provide(Sql)),
   LoggerLive
 )
 

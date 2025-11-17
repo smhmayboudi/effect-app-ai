@@ -1,14 +1,16 @@
-import { Config, Effect, Layer, pipe } from "effect"
-
 import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel } from "@effect/ai-openai"
 import { NodeHttpClient } from "@effect/platform-node"
+import { SqlClient } from "@effect/sql"
+import { NodeFS } from "@electric-sql/pglite/nodefs"
+import { vector } from "@electric-sql/pglite/vector"
+import { Config, Effect, Layer, pipe, String } from "effect"
 import { BusinessIntelligenceService } from "./BusinessIntelligenceService.js"
 import { AIServiceError, BusinessLogicError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
 import { LoggerLive } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
+import { PGliteClient } from "./PGlite/index.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
 import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
-import { PGLiteVectorService } from "./PGLiteVectorService.js"
 
 const biDemoProgram = Effect.gen(function*() {
   const biService = yield* BusinessIntelligenceService
@@ -199,33 +201,76 @@ const AiLayers = Layer.mergeAll(
   LanguageModelLayer
 )
 
+// const Migrator = PGliteMigrator.layer({
+//   loader: PGliteMigrator.fromFileSystem(
+//     fileURLToPath(new URL("./migration/", import.meta.url))
+//   ),
+//   table: "tbl_sql_migration"
+// }).pipe(
+//   Layer.provide(NodeContext.layer)
+// )
+
+export const Migrator = Layer.effectDiscard(
+  Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`CREATE EXTENSION IF NOT EXISTS vector`
+    yield* sql`
+          CREATE TABLE IF NOT EXISTS embeddings (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            embedding VECTOR(1536),
+            type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            metadata JSONB,
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+  `
+    yield* sql`
+      CREATE INDEX IF NOT EXISTS embeddings_idx
+      ON embeddings
+      USING ivfflat (embedding vector_cosine_ops)
+      WITH (lists = 100)
+  `
+  })
+)
+
+const Client = PGliteClient.layer({
+  extensions: { vector },
+  fs: new NodeFS("./data/"),
+  transformQueryNames: String.camelToSnake,
+  transformResultNames: String.snakeToCamel
+})
+
+const Sql = Migrator.pipe(Layer.provideMerge(Client))
+
 // Create the core application layers
 const CoreLayers = Layer.mergeAll(
   MockDatabaseService.Default,
-  PGLiteVectorOps.Default.pipe(
-    Layer.provide(PGLiteVectorService.Default)
-  ),
+  PGLiteVectorOps.Default.pipe(Layer.provide(Sql)),
   LoggerLive
 )
 
+// Create the complete application layer by merging all dependencies
 const AppLayer = Layer.provide(
   PGLiteQAService.Default,
   CoreLayers
 )
 
 // Add to your layer configuration
-const BILayer = Layer.provideMerge(
-  BusinessIntelligenceService.Default.pipe(
-    Layer.provide(MockDatabaseService.Default)
-  ),
-  AppLayer
+const BILayer = BusinessIntelligenceService.Default.pipe(
+  Layer.provide(MockDatabaseService.Default)
 )
 
 // Run the BI demo
 pipe(
   biDemoProgram,
   Effect.provide(BILayer),
+  Effect.provide(AppLayer),
   Effect.provide(AiLayers),
+  Effect.provide(PGliteClient.layer({
+    extensions: { vector },
+    fs: new NodeFS("./data/")
+  })),
   Effect.tapBoth({
     onFailure: (error) => Effect.sync(() => console.error("💥 BI Error:", error)),
     onSuccess: (result) => Effect.sync(() => console.log(result))

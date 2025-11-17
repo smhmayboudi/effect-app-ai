@@ -1,10 +1,10 @@
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
+import { SqlClient } from "@effect/sql"
 import { Effect, Schedule } from "effect"
 import { AIServiceError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
 import { LoggerService } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
 import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
-import { PGLiteVectorService } from "./PGLiteVectorService.js"
 import {
   type EmbeddingInput,
   EmbeddingInputSchema,
@@ -120,7 +120,7 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
 
     const generateAnswer = (
       question: string,
-      context: Array<EmbeddingOutput>,
+      context: ReadonlyArray<EmbeddingOutput>,
       structuredData: StructuredData
     ) =>
       Effect.gen(function*() {
@@ -479,8 +479,8 @@ Question: ${question}`
 
     const clearVectorStore = () =>
       Effect.gen(function*() {
-        const pglite = yield* PGLiteVectorService
-        yield* Effect.tryPromise(() => pglite.db.query<void>("DELETE FROM embeddings")).pipe(
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`DELETE FROM embeddings`.pipe(
           Effect.mapError((error) =>
             new VectorStoreError({
               message: "Failed to clear vector store",
@@ -509,7 +509,7 @@ Question: ${question}`
         const orderIds = userOrders.map((order) => `order_${order.id}`)
 
         // Calculate user's preference profile (average of their orders)
-        const userProfiles = yield* vectorOps.averageEmbedding(orderIds).pipe(
+        const avgEmbedding = yield* vectorOps.averageEmbedding(orderIds).pipe(
           Effect.mapError((error) =>
             new VectorStoreError({
               message: "Failed to calculate user's preference profile",
@@ -519,7 +519,6 @@ Question: ${question}`
         )
 
         // Find products similar to user's preference profile
-        const avgEmbedding = userProfiles[0]?.avg_embedding
         if (!avgEmbedding) {
           return []
         }
