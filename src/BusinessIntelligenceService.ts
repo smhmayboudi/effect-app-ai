@@ -44,24 +44,26 @@ export class BusinessIntelligenceService
             order.created_at > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
           )
 
-          return {
-            overview: {
-              totalRevenue,
-              totalUsers: users.length,
-              totalOrders: orders.length,
-              completedOrders: completedOrders.length,
-              averageOrderValue: Math.round(averageOrderValue),
-              conversionRate: Math.round(conversionRate * 100) / 100
-            },
-            anomalies: recentLargeOrders,
-            trends: yield* analyzeBusinessTrends(orders, users).pipe(
-              Effect.mapError((error) =>
-                new BusinessLogicError({
-                  message: "Failed to analyze business trends for dashboard",
-                  cause: error
-                })
-              )
+          const trends = yield* analyzeBusinessTrends(orders, users).pipe(
+            Effect.mapError((error) =>
+              new BusinessLogicError({
+                message: "Failed to analyze business trends for dashboard",
+                cause: error
+              })
             )
+          )
+
+          return {
+            anomalies: recentLargeOrders,
+            overview: {
+              averageOrderValue: Math.round(averageOrderValue),
+              completedOrders: completedOrders.length,
+              conversionRate: Math.round(conversionRate * 100) / 100,
+              totalOrders: orders.length,
+              totalRevenue,
+              totalUsers: users.length
+            },
+            trends
           }
         })
 
@@ -110,11 +112,11 @@ export class BusinessIntelligenceService
           )
 
           return {
-            query,
-            visualizationType,
-            data: data.slice(0, 10), // Limit data size for response
+            data,
             insights,
-            suggestedActions
+            query,
+            suggestedActions,
+            visualizationType
           }
         })
 
@@ -130,14 +132,16 @@ export class BusinessIntelligenceService
             }))
 
           const trend = calculateTrend(historicalData, period)
+          const factors = yield* identifyTrendFactors(trend, orders)
+          const recommendation = getTrendRecommendation(trend.direction, period)
 
           return {
-            period,
-            currentTrend: trend.direction,
             confidence: Math.round(trend.confidence * 100) / 100,
+            currentTrend: trend.direction,
+            factors,
             forecast: Math.round(trend.forecast),
-            factors: yield* identifyTrendFactors(trend, orders),
-            recommendation: getTrendRecommendation(trend.direction, period)
+            period,
+            recommendation
           }
         })
 
@@ -173,36 +177,39 @@ export class BusinessIntelligenceService
             const recency = Date.now() - lastOrder
             const frequency = userOrders.length
             const monetary = totalSpent
+            const segment = calculateRFMSegment(recency, frequency, monetary)
 
             return {
-              user,
-              segment: calculateRFMSegment(recency, frequency, monetary),
               metrics: {
-                recency: Math.round(recency / (24 * 60 * 60 * 1000)), // Convert to days
                 frequency,
                 monetary,
+                recency: Math.round(recency / (24 * 60 * 60 * 1000)), // Convert to days
                 totalOrders: userOrders.length
-              }
+              },
+              segment,
+              user
             }
           })
 
           const groupedSegments = groupBySegment(customerSegments)
           const segmentStats = calculateSegmentStats(groupedSegments)
+          const recommendations = yield* generateSegmentRecommendations(segmentStats).pipe(
+            Effect.mapError((error) =>
+              new AIServiceError({
+                message: "Failed to generate segment recommendations",
+                cause: error
+              })
+            )
+          )
 
           return {
+            recommendations,
             segments: groupedSegments,
-            statistics: segmentStats,
-            recommendations: yield* generateSegmentRecommendations(segmentStats).pipe(
-              Effect.mapError((error) =>
-                new AIServiceError({
-                  message: "Failed to generate segment recommendations",
-                  cause: error
-                })
-              )
-            )
+            statistics: segmentStats
           }
         })
 
+      // 5. Business Insights Generation
       const generateBusinessInsights = () =>
         Effect.gen(function*() {
           const [dashboard, segments, trends] = yield* Effect.all([
@@ -223,48 +230,48 @@ export class BusinessIntelligenceService
           // Revenue insights - using dashboard data
           if (dashboard.overview.totalRevenue > 100000) {
             insights.push({
-              id: "high-revenue",
-              title: "Strong Revenue Performance",
+              data: [],
               description: `Company has exceeded $${
                 Math.round(dashboard.overview.totalRevenue / 1000)
               }K in total revenue`,
+              id: "high-revenue",
               metrics: [
-                { label: "Total Revenue", value: dashboard.overview.totalRevenue, unit: "$" },
                 { label: "Average Order Value", value: dashboard.overview.averageOrderValue, unit: "$" },
-                { label: "Conversion Rate", value: dashboard.overview.conversionRate, unit: "%" }
+                { label: "Conversion Rate", value: dashboard.overview.conversionRate, unit: "%" },
+                { label: "Total Revenue", value: dashboard.overview.totalRevenue, unit: "$" }
               ],
-              visualization: "metric",
-              data: [],
               recommendations: [
                 "Consider expanding high-value product lines",
                 "Evaluate customer acquisition costs for optimization"
               ],
-              severity: "info"
+              severity: "info",
+              title: "Strong Revenue Performance",
+              visualization: "metric"
             })
           }
 
           // Anomaly insights - using dashboard anomalies
           if (dashboard.anomalies.length > 0) {
             insights.push({
-              id: "large-orders",
-              title: "Recent Large Orders Detected",
+              data: dashboard.anomalies.map((order) => ({
+                amount: order.amount,
+                customer: order.customer_id,
+                description: order.description,
+                id: order.id
+              })),
               description: `${dashboard.anomalies.length} high-value orders in the past week`,
+              id: "large-orders",
               metrics: [
                 { label: "Large Orders", value: dashboard.anomalies.length },
                 { label: "Total Value", value: dashboard.anomalies.reduce((sum, o) => sum + o.amount, 0), unit: "$" }
               ],
-              visualization: "bar",
-              data: dashboard.anomalies.map((order) => ({
-                id: order.id,
-                amount: order.amount,
-                customer: order.customer_id,
-                description: order.description
-              })),
               recommendations: [
-                "Follow up with customers for repeat business",
-                "Analyze what drove these large purchases"
+                "Analyze what drove these large purchases",
+                "Follow up with customers for repeat business"
               ],
-              severity: "medium"
+              severity: "medium",
+              title: "Recent Large Orders Detected",
+              visualization: "bar"
             })
           }
 
@@ -272,44 +279,44 @@ export class BusinessIntelligenceService
           const championCount = segments.segments.champions?.length || 0
           if (championCount > 0) {
             insights.push({
-              id: "champion-customers",
-              title: "High-Value Customer Segment Identified",
+              data: Object.entries(segments.statistics).map(([segment, stats]) => ({
+                customerCount: stats.customerCount,
+                segment,
+                totalRevenue: stats.totalRevenue
+              })),
               description: `${championCount} champion customers driving significant revenue`,
+              id: "champion-customers",
               metrics: [
                 { label: "Champion Customers", value: championCount },
                 { label: "Segment Revenue", value: segments.statistics.champions?.totalRevenue || 0, unit: "$" }
               ],
-              visualization: "pie",
-              data: Object.entries(segments.statistics).map(([segment, stats]) => ({
-                segment,
-                customerCount: stats.customerCount,
-                totalRevenue: stats.totalRevenue
-              })),
               recommendations: [
                 "Create exclusive offers for champion customers",
                 "Develop loyalty program for high-value segments"
               ],
-              severity: "high"
+              severity: "high",
+              title: "High-Value Customer Segment Identified",
+              visualization: "pie"
             })
           }
 
           // Trend insights - using trends data
           if (trends.currentTrend === "up") {
             insights.push({
-              id: "positive-trend",
-              title: "Positive Sales Trend Detected",
+              data: [],
               description: `Sales showing ${trends.currentTrend}ward trend with ${
                 (trends.confidence * 100).toFixed(1)
               }% confidence`,
+              id: "positive-trend",
               metrics: [
-                { label: "Trend Direction", value: trends.currentTrend === "up" ? 1 : -1 },
                 { label: "Confidence", value: trends.confidence * 100, unit: "%" },
-                { label: "Next Period Forecast", value: trends.forecast, unit: "$" }
+                { label: "Next Period Forecast", value: trends.forecast, unit: "$" },
+                { label: "Trend Direction", value: trends.currentTrend === "up" ? 1 : -1 }
               ],
-              visualization: "line",
-              data: [],
               recommendations: [trends.recommendation],
-              severity: "info"
+              severity: "info",
+              title: "Positive Sales Trend Detected",
+              visualization: "line"
             })
           }
 
@@ -322,11 +329,11 @@ export class BusinessIntelligenceService
           const response = yield* qaService.answerQuestion(
             `What type of chart best visualizes this business question? Choose from: bar, line, pie, table, metric. Return only the chart type. Question: ${query}`
           )
-
           const chartType = response.toLowerCase().trim()
           if (["bar", "line", "pie", "table", "metric"].includes(chartType)) {
             return chartType as "bar" | "line" | "pie" | "table" | "metric"
           }
+
           return "table"
         })
 
@@ -370,9 +377,9 @@ export class BusinessIntelligenceService
       ) => {
         // Use period to determine time window
         const periodMs = {
-          weekly: 7 * 24 * 60 * 60 * 1000,
           monthly: 30 * 24 * 60 * 60 * 1000,
-          quarterly: 90 * 24 * 60 * 60 * 1000
+          quarterly: 90 * 24 * 60 * 60 * 1000,
+          weekly: 7 * 24 * 60 * 60 * 1000
         }[period]
 
         const recent = data.filter((d) => d.date > new Date(Date.now() - periodMs))
@@ -388,18 +395,19 @@ export class BusinessIntelligenceService
         const changePercent = previousAvg > 0 ? (change / previousAvg) : 0
 
         return {
-          direction: change > 0 ? "up" : change < 0 ? "down" : "stable",
           confidence: Math.min(Math.abs(changePercent), 1), // Cap at 1.0
+          direction: change > 0 ? "up" : change < 0 ? "down" : "stable",
           forecast: recentAvg * (1 + changePercent) // Projected next period
         }
       }
 
       const getTrendRecommendation = (direction: string, period: string) => {
         const recommendations = {
-          up: `Continue current strategies as ${period}ly trend is positive`,
           down: `Investigate causes for ${period}ly decline and adjust strategy`,
-          stable: `Explore growth opportunities as ${period}ly performance is stable`
+          stable: `Explore growth opportunities as ${period}ly performance is stable`,
+          up: `Continue current strategies as ${period}ly trend is positive`
         }
+
         return recommendations[direction as keyof typeof recommendations] || "Monitor trends closely"
       }
 
@@ -413,24 +421,25 @@ export class BusinessIntelligenceService
         if (totalScore >= 8) return "champions"
         if (totalScore >= 6) return "loyal"
         if (totalScore >= 4) return "potential"
+
         return "at-risk"
       }
 
       const groupBySegment = (
         segments: Array<{
-          user: {
-            readonly name: string
-            readonly id: number
-            readonly email: string
-            readonly role: string
-            readonly department: string
-          }
-          segment: string
           metrics: {
-            recency: number
             frequency: number
             monetary: number
+            recency: number
             totalOrders: number
+          }
+          segment: string
+          user: {
+            readonly department: string
+            readonly email: string
+            readonly id: number
+            readonly name: string
+            readonly role: string
           }
         }>
       ) => {
@@ -441,19 +450,19 @@ export class BusinessIntelligenceService
         }, {} as Record<
           string,
           Array<{
-            user: {
-              readonly name: string
-              readonly id: number
-              readonly email: string
-              readonly role: string
-              readonly department: string
-            }
-            segment: string
             metrics: {
-              recency: number
               frequency: number
               monetary: number
+              recency: number
               totalOrders: number
+            }
+            segment: string
+            user: {
+              readonly department: string
+              readonly email: string
+              readonly id: number
+              readonly name: string
+              readonly role: string
             }
           }>
         >)
@@ -463,19 +472,19 @@ export class BusinessIntelligenceService
         groupedSegments: Record<
           string,
           Array<{
-            user: {
-              readonly name: string
-              readonly id: number
-              readonly email: string
-              readonly role: string
-              readonly department: string
-            }
-            segment: string
             metrics: {
-              recency: number
               frequency: number
               monetary: number
+              recency: number
               totalOrders: number
+            }
+            segment: string
+            user: {
+              readonly department: string
+              readonly email: string
+              readonly id: number
+              readonly name: string
+              readonly role: string
             }
           }>
         >
@@ -485,26 +494,27 @@ export class BusinessIntelligenceService
           const avgOrderValue = totalRevenue / customers.reduce((sum, customer) => sum + customer.metrics.frequency, 1)
 
           acc[segment] = {
-            customerCount: customers.length,
-            totalRevenue,
             avgOrderValue: Math.round(avgOrderValue),
-            avgRecency: Math.round(customers.reduce((sum, c) => sum + c.metrics.recency, 0) / customers.length)
+            avgRecency: Math.round(customers.reduce((sum, c) => sum + c.metrics.recency, 0) / customers.length),
+            customerCount: customers.length,
+            totalRevenue
           }
+
           return acc
         }, {} as Record<string, {
-          customerCount: number
-          totalRevenue: number
           avgOrderValue: number
           avgRecency: number
+          customerCount: number
+          totalRevenue: number
         }>)
       }
 
       const generateSegmentRecommendations = (
         segmentStats: Record<string, {
-          customerCount: number
-          totalRevenue: number
           avgOrderValue: number
           avgRecency: number
+          customerCount: number
+          totalRevenue: number
         }>
       ) =>
         qaService.answerQuestion(
@@ -514,8 +524,8 @@ export class BusinessIntelligenceService
         )
 
       const identifyTrendFactors = (trend: {
-        direction: string
         confidence: number
+        direction: string
         forecast: number
       }, orders: Array<Order>) =>
         qaService.answerQuestion(
