@@ -37,6 +37,7 @@
     "@effect/sql": "latest",
     "@effect/sql-libsql": "latest",
     "@electric-sql/pglite": "^0.3.11",
+    "@toon-format/toon": "^1.0.0",
     "effect": "latest"
   },
   "devDependencies": {

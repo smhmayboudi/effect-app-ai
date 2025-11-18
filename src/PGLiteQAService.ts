@@ -1,5 +1,6 @@
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
 import { SqlClient } from "@effect/sql"
+import { encode } from "@toon-format/toon"
 import { Effect, Schedule } from "effect"
 import { AIServiceError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
 import { LoggerService } from "./Logging.js"
@@ -137,7 +138,7 @@ SEMANTIC CONTEXT (from vector search): ${
           }
 
 STRUCTURED DATA (from database):
-${JSON.stringify(structuredData, null, 2)}
+${encode(structuredData)}
 
 Guidelines:
 - Be accurate and factual
