@@ -34,6 +34,7 @@
     "@effect/platform-node": "latest",
     "@effect/schema": "latest",
     "@effect/sql": "latest",
+    "@effect/sql-libsql": "latest",
     "@electric-sql/pglite": "^0.3.11",
     "effect": "latest"
   },
