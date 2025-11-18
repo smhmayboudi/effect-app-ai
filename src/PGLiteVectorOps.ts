@@ -110,7 +110,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         JSON.stringify(data.embedding)
       }, ${data.type}, ${data.entity_id}, ${
         JSON.stringify(data.metadata || {})
-      }) ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, created_at = NOW()`
+      }) ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, created_at = CURRENT_TIMESTAMP`
         .pipe(
           Effect.mapError((error) =>
             new VectorStoreError({
@@ -130,7 +130,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
             }', '${item.type}', '${item.entity_id}', '${JSON.stringify(item.metadata || {})}')`
           ).join(", ")
         )
-      } ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, created_at = NOW()`
+      } ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata, created_at = CURRENT_TIMESTAMP`
         .pipe(
           Effect.mapError((error) =>
             new VectorStoreError({

@@ -215,22 +215,19 @@ export const Migrator = Layer.effectDiscard(
     const sql = yield* SqlClient.SqlClient
     yield* sql`CREATE EXTENSION IF NOT EXISTS vector`
     yield* sql`
-          CREATE TABLE IF NOT EXISTS embeddings (
-            id TEXT PRIMARY KEY,
-            content TEXT NOT NULL,
-            embedding VECTOR(1536),
-            type TEXT NOT NULL,
-            entity_id TEXT NOT NULL,
-            metadata JSONB,
-            created_at TIMESTAMP DEFAULT NOW()
-          )
-  `
+      CREATE TABLE IF NOT EXISTS embeddings (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        embedding VECTOR(1536) NOT NULL,
+        type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        metadata JSONB NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `
     yield* sql`
-      CREATE INDEX IF NOT EXISTS embeddings_idx
-      ON embeddings
-      USING ivfflat (embedding vector_cosine_ops)
-      WITH (lists = 100)
-  `
+      CREATE INDEX IF NOT EXISTS embeddings_idx ON embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)
+    `
   })
 )
 

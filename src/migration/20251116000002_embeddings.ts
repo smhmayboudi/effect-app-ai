@@ -11,7 +11,7 @@ export default SqlClient.SqlClient.pipe(
         type TEXT NOT NULL,
         entity_id TEXT NOT NULL,
         metadata JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `
   )
