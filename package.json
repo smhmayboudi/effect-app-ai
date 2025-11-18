@@ -28,6 +28,7 @@
     "changeset-publish": "pnpm build && TEST_DIST= pnpm vitest && changeset publish"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.4.2-r.1",
     "@effect/ai": "latest",
     "@effect/ai-openai": "latest",
     "@effect/experimental": "latest",
