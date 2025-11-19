@@ -56,7 +56,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           whereConditions.push(`type = '${filters.type}'`)
         }
         if (query) {
-          whereConditions.push(`content ILIKE '%${query}%'`)
+          whereConditions.push(`LOWER(content) ILIKE LOWER('%${query}%')`)
         }
 
         return yield* sql<
