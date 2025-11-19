@@ -1,7 +1,7 @@
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
 import { SqlClient } from "@effect/sql"
 import { encode } from "@toon-format/toon"
-import { Effect, Schedule } from "effect"
+import { Duration, Effect, Schedule } from "effect"
 import { AIServiceError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
 import { LoggerService } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
@@ -282,7 +282,7 @@ Question: ${question}`
 
         const allEmbeddings = yield* embeddingModel.embedMany(allTexts).pipe(
           Effect.tap(() => logger.debug(`Generated embeddings for ${allTexts.length} items`)),
-          Effect.retry({ times: 2, schedule: Schedule.fixed("100 millis") }),
+          Effect.retry({ schedule: Schedule.fixed(Duration.millis(100)), times: 2 }),
           Effect.mapError((error) =>
             new EmbeddingError({
               message: "Failed to generate embeddings for data sync",
@@ -358,7 +358,7 @@ Question: ${question}`
 
         // Use embedMany directly - it returns Array<Array<number>>
         const embeddings = yield* embeddingModel.embedMany(texts).pipe(
-          Effect.retry({ times: 2, schedule: Schedule.fixed("100 millis") }),
+          Effect.retry({ schedule: Schedule.fixed(Duration.millis(100)), times: 2 }),
           Effect.mapError((error) =>
             new EmbeddingError({
               message: `Failed to generate batch embeddings for ${texts.length} texts`,

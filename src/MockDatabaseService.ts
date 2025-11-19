@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { DatabaseError } from "./Errors.js"
 import type { Order, Product, User } from "./Schemas.js"
 
@@ -74,7 +74,7 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
     getUsers: (filters?: { ids?: Array<string>; role?: string; department?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
-        yield* Effect.sleep("1 millis")
+        yield* Effect.sleep(Duration.millis(1))
 
         try {
           let users = [...mockUsers]
@@ -104,7 +104,7 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
     getOrders: (filters?: { ids?: Array<string>; customer_id?: number; status?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
-        yield* Effect.sleep("1 millis")
+        yield* Effect.sleep(Duration.millis(1))
 
         try {
           let orders = [...mockOrders]
@@ -134,7 +134,7 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
     getProducts: (filters?: { ids?: Array<string>; category?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
-        yield* Effect.sleep("1 millis")
+        yield* Effect.sleep(Duration.millis(1))
 
         try {
           let products = [...mockProducts]
@@ -160,7 +160,7 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
     getUserStats: (userId: number) =>
       Effect.gen(function*() {
         // Simulate async database call
-        yield* Effect.sleep("1 millis")
+        yield* Effect.sleep(Duration.millis(1))
 
         try {
           const userOrders = mockOrders.filter((order) => order.customer_id === userId)

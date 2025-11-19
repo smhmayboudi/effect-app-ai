@@ -88,7 +88,7 @@ export const realEmbeddingsProgram = Effect.gen(function*() {
     )
     console.log(`🤖 Answer: ${answer}\n`)
 
-    // yield* Effect.sleep("1 seconds") // Rate limiting for API
+    // yield* Effect.sleep(Duration.seconds(1)) // Rate limiting for API
   }
 
   const recommendations = yield* qaService.advancedRecommendations(1).pipe(

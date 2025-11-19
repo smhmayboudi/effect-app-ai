@@ -1,11 +1,11 @@
-import { type Duration, Effect, Queue, Ref } from "effect"
+import { Duration, Effect, Queue, Ref } from "effect"
 
 export class QueryDebounceService extends Effect.Service<QueryDebounceService>()("QueryDebounceService", {
   effect: Effect.gen(function*() {
     const pendingQueries = yield* Ref.make(new Map<string, Queue.Queue<string>>())
 
     return {
-      debounceQuery: <T>(key: string, query: Effect.Effect<T>, delay: Duration.DurationInput = "200 millis") =>
+      debounceQuery: <T>(key: string, query: Effect.Effect<T>, delay: Duration.DurationInput = Duration.millis(200)) =>
         Effect.gen(function*() {
           const queries = yield* Ref.get(pendingQueries)
           const existing = queries.get(key)
