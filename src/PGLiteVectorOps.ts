@@ -8,15 +8,22 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
     const sql = yield* SqlClient.SqlClient
 
     // Multi-stage search with different distance metrics
-    const advancedSemanticSearch = (queryEmbedding: Array<number>, options?: {
-      filters?: { entity_id?: string; type?: string }
-      limit?: number
-      similarityThreshold?: number
-    }) =>
+    const advancedSemanticSearch = (
+      queryEmbedding: Array<number>,
+      options: {
+        filters: { entity_id?: string | undefined; type?: string | undefined }
+        limit: number
+        similarityThresholdCosine: number
+        similarityThresholdL2: number
+      } = { filters: {}, limit: 10, similarityThresholdCosine: 0.7, similarityThresholdL2: 0.7 }
+    ) =>
       Effect.gen(function*() {
-        const { limit = 10 } = options || {}
         // Stage 1: Broad search with cosine similarity
-        const broadResults = yield* semanticSearch(queryEmbedding, { ...options, limit })
+        const broadResults = yield* semanticSearch(queryEmbedding, {
+          filters: options.filters,
+          limit: options.limit,
+          similarityThreshold: options.similarityThresholdCosine
+        })
         if (broadResults.length === 0) {
           return []
         }
@@ -26,7 +33,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
 
         return yield* sql<
           EmbeddingOutput & { cosine_score: number; l2_score: number; combined_score: number }
-        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as cosine_score, -(embedding <-> ${formattedEmbedding}) as l2_score, (1 - (embedding <=> ${formattedEmbedding})) * 0.7 + (-(embedding <-> ${formattedEmbedding})) * 0.3 as combined_score FROM embeddings WHERE id = ANY(${ids}) ORDER BY combined_score DESC LIMIT ${limit}`
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as cosine_score, -(embedding <-> ${formattedEmbedding}) as l2_score, (1 - (embedding <=> ${formattedEmbedding})) * ${options.similarityThresholdCosine} + (-(embedding <-> ${formattedEmbedding})) * ${options.similarityThresholdL2} as combined_score FROM embeddings WHERE id = ANY(${ids}) ORDER BY combined_score DESC LIMIT ${options.limit}`
           .pipe(
             Effect.map((rows) => rows.map((row) => ({ ...row, similarity: row.combined_score }))),
             Effect.mapError((error) =>
@@ -128,11 +135,13 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       })
 
     // Detect outliers using L2 distance
-    const detectAnomalies = (threshold: number = 2.0, options?: {
-      limit?: number
-    }) =>
+    const detectAnomalies = (
+      threshold: number = 2.0,
+      options: {
+        limit: number
+      } = { limit: 10 }
+    ) =>
       Effect.gen(function*() {
-        const { limit = 20 } = options || {}
         // Calculate centroid of all embeddings
         const result = yield* sql<{ centroid: string }>`SELECT AVG(embedding) as centroid FROM embeddings`
           .pipe(
@@ -156,7 +165,7 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
 
         return yield* sql<
           EmbeddingOutput & { distance: number }
-        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity, (embedding <-> ${formattedEmbedding}) as distance FROM embeddings WHERE (embedding <-> ${formattedEmbedding}) > ${threshold} ORDER BY distance DESC LIMIT ${limit}`
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity, (embedding <-> ${formattedEmbedding}) as distance FROM embeddings WHERE (embedding <-> ${formattedEmbedding}) > ${threshold} ORDER BY distance DESC LIMIT ${options.limit}`
           .pipe(
             Effect.mapError((error) =>
               new VectorStoreError({
@@ -168,38 +177,47 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       })
 
     // Find similar items to a given item
-    const findSimilar = (itemId: string, options?: {
-      limit?: number
-    }) =>
-      Effect.gen(function*() {
-        const { limit = 5 } = options || {}
+    const findSimilar = (
+      itemId: string,
+      options: {
+        limit: number
+      } = { limit: 10 }
+    ) =>
+      sql<
+        EmbeddingOutput
+      >`WITH target AS (SELECT embedding FROM embeddings WHERE id = ${itemId}) SELECT e.id, e.content, e.type, e.entity_id, e.metadata, 1 - (e.embedding <=> t.embedding) as similarity FROM embeddings e, target t WHERE e.id != ${itemId} ORDER BY e.embedding <=> t.embedding LIMIT ${options.limit}`
+        .pipe(
+          Effect.mapError((error) =>
+            new VectorStoreError({
+              message: "Failed to perform find similar",
+              cause: error
+            })
+          )
+        )
 
-        return yield* sql<
-          EmbeddingOutput
-        >`WITH target AS (SELECT embedding FROM embeddings WHERE id = ${itemId}) SELECT e.id, e.content, e.type, e.entity_id, e.metadata, 1 - (e.embedding <=> t.embedding) as similarity FROM embeddings e, target t WHERE e.id != ${itemId} ORDER BY e.embedding <=> t.embedding LIMIT ${limit}`
-      })
-
-    const hybridSearch = (query: string, queryEmbedding: Array<number>, options?: {
-      filters?: { type?: string }
-      limit?: number
-      similarityThreshold?: number
-    }) =>
+    const hybridSearch = (
+      queryEmbedding: Array<number>,
+      options: {
+        filters: { query?: string | undefined; type?: string | undefined }
+        limit: number
+        similarityThreshold: number
+      } = { filters: {}, limit: 10, similarityThreshold: 0.7 }
+    ) =>
       Effect.gen(function*() {
-        const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
         const formattedEmbedding = JSON.stringify(queryEmbedding)
         const whereConditions = ["1 <= 2"]
-        if (filters.type) {
-          whereConditions.push(`type = '${filters.type}'`)
+        if (options.filters.type) {
+          whereConditions.push(`type = '${options.filters.type}'`)
         }
-        if (query) {
-          whereConditions.push(`LOWER(content) ILIKE LOWER('%${query}%')`)
+        if (options.filters.query) {
+          whereConditions.push(`LOWER(content) ILIKE LOWER('%${options.filters.query}%')`)
         }
 
         return yield* sql<
           EmbeddingOutput
         >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity FROM embeddings WHERE ${
           sql.unsafe(whereConditions.join(" AND "))
-        } AND (1 - (embedding <=> ${formattedEmbedding})) >= ${similarityThreshold} ORDER BY embedding <=> ${formattedEmbedding} LIMIT ${limit}`
+        } AND (1 - (embedding <=> ${formattedEmbedding})) >= ${options.similarityThreshold} ORDER BY embedding <=> ${formattedEmbedding} LIMIT ${options.limit}`
           .pipe(
             Effect.mapError((error) =>
               new VectorStoreError({
@@ -211,12 +229,14 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
       })
 
     // Enhanced semantic search with multiple distance metrics
-    const multiMetricSearch = (queryEmbedding: Array<number>, options?: {
-      limit?: number
-      metric?: "cosine" | "hamming" | "inner_product" | "jaccard" | "l1" | "l2"
-    }) =>
+    const multiMetricSearch = (
+      queryEmbedding: Array<number>,
+      options: {
+        limit: number
+        metric: "cosine" | "hamming" | "inner_product" | "jaccard" | "l1" | "l2"
+      } = { limit: 10, metric: "cosine" }
+    ) =>
       Effect.gen(function*() {
-        const { limit = 10, metric = "cosine" } = options || {}
         const formattedEmbedding = JSON.stringify(queryEmbedding)
         const distanceFunctions = {
           cosine: "<=>",
@@ -226,41 +246,44 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
           l1: "<+>",
           l2: "<->"
         } as const
-        const distanceOp = distanceFunctions[metric]
+        const distanceOp = distanceFunctions[options.metric]
+
         return yield* sql<
           EmbeddingOutput & { distance: number }
-        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity, (embedding ${distanceOp} ${formattedEmbedding}) as distance FROM embeddings ORDER BY embedding ${distanceOp} ${formattedEmbedding} LIMIT ${limit}`
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity, (embedding ${distanceOp} ${formattedEmbedding}) as distance FROM embeddings ORDER BY embedding ${distanceOp} ${formattedEmbedding} LIMIT ${options.limit}`
           .pipe(
             Effect.mapError((error) =>
               new VectorStoreError({
-                message: `Failed to perform multi-metric search with ${metric} distance`,
+                message: `Failed to perform multi-metric search with ${options.metric} distance`,
                 cause: error
               })
             )
           )
       })
 
-    const semanticSearch = (queryEmbedding: Array<number>, options?: {
-      filters?: { entity_id?: string; type?: string }
-      limit?: number
-      similarityThreshold?: number
-    }) =>
+    const semanticSearch = (
+      queryEmbedding: Array<number>,
+      options: {
+        filters: { entity_id?: string | undefined; type?: string | undefined }
+        limit: number
+        similarityThreshold: number
+      } = { filters: {}, limit: 10, similarityThreshold: 0.7 }
+    ) =>
       Effect.gen(function*() {
-        const { filters = {}, limit = 10, similarityThreshold = 0.7 } = options || {}
         const formattedEmbedding = JSON.stringify(queryEmbedding)
         const whereConditions = ["1 <= 2"]
-        if (filters.type) {
-          whereConditions.push(`type = '${filters.type}'`)
+        if (options.filters.type) {
+          whereConditions.push(`type = '${options.filters.type}'`)
         }
-        if (filters.entity_id) {
-          whereConditions.push(`entity_id = '${filters.entity_id}'`)
+        if (options.filters.entity_id) {
+          whereConditions.push(`entity_id = '${options.filters.entity_id}'`)
         }
 
         return yield* sql<
           EmbeddingOutput
         >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as similarity FROM embeddings WHERE ${
           sql.unsafe(whereConditions.join(" AND "))
-        } AND (1 - (embedding <=> ${formattedEmbedding})) >= ${similarityThreshold} ORDER BY embedding <=> ${formattedEmbedding} LIMIT ${limit}`
+        } AND (1 - (embedding <=> ${formattedEmbedding})) >= ${options.similarityThreshold} ORDER BY embedding <=> ${formattedEmbedding} LIMIT ${options.limit}`
           .pipe(
             Effect.mapError((error) =>
               new VectorStoreError({
