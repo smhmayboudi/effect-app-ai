@@ -32,10 +32,9 @@ export class PGLiteVectorOps extends Effect.Service<PGLiteVectorOps>()("PGLiteVe
         const ids = broadResults.map((row) => row.id)
 
         return yield* sql<
-          EmbeddingOutput & { cosine_score: number; l2_score: number; combined_score: number }
-        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as cosine_score, -(embedding <-> ${formattedEmbedding}) as l2_score, (1 - (embedding <=> ${formattedEmbedding})) * ${options.similarityThresholdCosine} + (-(embedding <-> ${formattedEmbedding})) * ${options.similarityThresholdL2} as combined_score FROM embeddings WHERE id = ANY(${ids}) ORDER BY combined_score DESC LIMIT ${options.limit}`
+          EmbeddingOutput & { cosine_score: number; l2_score: number }
+        >`SELECT id, content, type, entity_id, metadata, 1 - (embedding <=> ${formattedEmbedding}) as cosine_score, -(embedding <-> ${formattedEmbedding}) as l2_score, (1 - (embedding <=> ${formattedEmbedding})) * ${options.similarityThresholdCosine} + (-(embedding <-> ${formattedEmbedding})) * ${options.similarityThresholdL2} as similarity FROM embeddings WHERE id = ANY(${ids}) ORDER BY combined_score DESC LIMIT ${options.limit}`
           .pipe(
-            Effect.map((rows) => rows.map((row) => ({ ...row, similarity: row.combined_score }))),
             Effect.mapError((error) =>
               new VectorStoreError({
                 message: "Failed to perform advanced semantic search",
