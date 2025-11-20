@@ -47,7 +47,7 @@ export interface PgliteClient<O extends Pglite.PGliteOptions = Pglite.PGliteOpti
  */
 export const PgliteClient = Context.GenericTag<PgliteClient>("@effect/sql-pglite/PgliteClient")
 
-const PgliteTransaction = Context.GenericTag<readonly [PgliteConnection, counter: number]>(
+const PgliteTransaction = Context.GenericTag<readonly [PGliteConnection, counter: number]>(
   "@effect/sql-pglite/PgliteClient/PgliteTransaction"
 )
 
@@ -59,6 +59,7 @@ export interface PgliteClientConfig<O extends Pglite.PGliteOptions> {
   readonly spanAttributes?: Record<string, unknown> | undefined
   readonly transformResultNames?: ((str: string) => string) | undefined
   readonly transformQueryNames?: ((str: string) => string) | undefined
+  readonly transformJson?: boolean | undefined
 
   dataDir?: string
   username?: string
@@ -77,7 +78,110 @@ export interface PgliteClientConfig<O extends Pglite.PGliteOptions> {
   readonly liveClient?: PGlite<O>
 }
 
-type PgliteConnection = SqlConnection.Connection
+type PGliteConnection = SqlConnection.Connection
+
+/**
+ * @category constructor
+ * @since 1.0.0
+ */
+const makeCompiler = (
+  transform?: (_: string) => string,
+  transformJson = true
+): Statement.Compiler => {
+  const escape = Statement.defaultEscape("\"")
+  const transformValue = transformJson && transform
+    ? Statement.defaultTransforms(transform).value
+    : undefined
+
+  return Statement.makeCompiler<PgJson>({
+    dialect: "pg",
+    onCustom: (
+      type,
+      placeholder,
+      withoutTransform
+    ) => {
+      console.log({ type, placeholder, withoutTransform })
+      // throw new Error("onCustom not implemented for PGlite")
+      switch (type.kind) {
+        case "PgJson": {
+          return [
+            placeholder(undefined),
+            [
+              withoutTransform || transformValue === undefined
+                ? type.i0
+                : transformValue(type.i0)
+            ]
+          ]
+        }
+      }
+    },
+    onIdentifier: (value, withoutTransform) =>
+      !transform || withoutTransform ? escape(value) : escape(transform(value)),
+    onInsert: (
+      columns,
+      placeholders,
+      values,
+      returning
+    ) => {
+      const sql = `(${columns.join(", ")}) VALUES ${placeholders}${returning ? ` RETURNING ${returning[0]}` : ""}`
+      const vals = values.flat().map((a) =>
+        typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+          ? a
+          : JSON.stringify(a)
+      )
+
+      return [sql, returning ? vals.concat(returning[1] as any) : vals]
+    },
+    onRecordUpdate: (
+      _placeholders,
+      _alias,
+      columns,
+      values,
+      returning
+    ) => {
+      const ids = values.map((row) => row[0])
+      const columnNames = columns.slice(1, columns.length - 1).split(",")
+      const setClauses = columnNames
+        .filter((col) => col !== "id")
+        .map((col) => {
+          const cases = values.map((row, index) => {
+            const valueIndex = columnNames.indexOf(col)
+            return `WHEN id = $${index * columnNames.length + 1} THEN $${index * columnNames.length + valueIndex + 1}`
+          }).join(" ")
+
+          return `${col} = CASE ${cases} ELSE ${col} END`
+        })
+        .join(", ")
+      const sql = `${setClauses} WHERE id IN (${ids.map((_, i) => `$${i * columnNames.length + 1}`).join(", ")})${
+        returning ? ` RETURNING ${returning[0]}` : ""
+      }`.trim()
+      const vals = values.flat().map((a) =>
+        typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+          ? a
+          : JSON.stringify(a)
+      )
+
+      return [sql, returning ? vals.concat(returning[1] as any) : vals]
+    },
+    onRecordUpdateSingle: (
+      columns,
+      values,
+      returning
+    ) => {
+      const sql = `${columns.map((a, i) => `${a}=$${i + 1}`).join(", ")}${
+        returning ? ` RETURNING ${returning[0]}` : ""
+      }`
+      const vals = values.map((a) =>
+        typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+          ? a
+          : JSON.stringify(a)
+      )
+
+      return [sql, returning ? vals.concat(returning[1] as any) : vals]
+    },
+    placeholder: (index, _value) => `$${index}`
+  })
+}
 
 /**
  * @category constructor
@@ -87,35 +191,23 @@ export const make = <O extends Pglite.PGliteOptions>(
   options: PgliteClientConfig<O>
 ): Effect.Effect<PgliteClient, never, Scope.Scope | Reactivity.Reactivity> =>
   Effect.gen(function*() {
-    const compiler = Statement.makeCompiler({
-      dialect: "pg",
-      onCustom: () => {
-        throw new Error("onCustom not implemented for PGlite")
-      },
-      onIdentifier: (value) => "\"" + value.replace(new RegExp("\"", "g"), "\"" + "\"") + "\"",
-      onInsert: () => {
-        throw new Error("onInsert not implemented for PGlite")
-      },
-      onRecordUpdate: () => {
-        throw new Error("onRecordUpdate not implemented for PGlite")
-      },
-      onRecordUpdateSingle: () => {
-        throw new Error("onRecordUpdateSingle not implemented for PGlite")
-      },
-      placeholder: (index, _value) => `$${index}`
-    })
+    const compiler = makeCompiler(
+      options.transformQueryNames,
+      options.transformJson
+    )
     const transformRows = options.transformResultNames ?
       Statement.defaultTransforms(
-        options.transformResultNames
+        options.transformResultNames,
+        options.transformJson
       ).array :
       undefined
 
     const spanAttributes: Array<[string, unknown]> = [
       ...(options.spanAttributes ? Object.entries(options.spanAttributes) : []),
-      [ATTR_DB_SYSTEM_NAME, "postgresql"]
+      [ATTR_DB_SYSTEM_NAME, "pglite"]
     ]
 
-    class PgliteConnectionImpl implements PgliteConnection {
+    class PGliteConnectionImpl implements PGliteConnection {
       constructor(readonly sdk: PGlite<O> | Pglite.Transaction) {}
 
       run(
@@ -173,13 +265,13 @@ export const make = <O extends Pglite.PGliteOptions>(
     }
 
     const connection = "liveClient" in options
-      ? new PgliteConnectionImpl(options.liveClient)
+      ? new PGliteConnectionImpl(options.liveClient)
       : yield* Effect.map(
         Effect.acquireRelease(
           Effect.promise(() => Pglite.PGlite.create(options as O)),
           (sdk) => Effect.sync(() => sdk.close())
         ),
-        (sdk) => new PgliteConnectionImpl(sdk)
+        (sdk) => new PGliteConnectionImpl(sdk)
       )
 
     // Create transaction support by properly integrating with PGlite's transaction functionality
@@ -189,7 +281,7 @@ export const make = <O extends Pglite.PGliteOptions>(
       acquireConnection: Effect.uninterruptibleMask((restore) =>
         Scope.make().pipe(
           Effect.flatMap((scope) =>
-            restore(Effect.succeed(connection as PgliteConnection)).pipe(
+            restore(Effect.succeed(connection as PGliteConnection)).pipe(
               Effect.flatMap((conn) =>
                 conn.executeUnprepared("BEGIN", [], undefined).pipe(
                   Effect.as([scope, conn] as const),
@@ -215,7 +307,7 @@ export const make = <O extends Pglite.PGliteOptions>(
     const acquirer = Effect.flatMap(
       Effect.serviceOption(PgliteTransaction),
       Option.match({
-        onNone: () => Effect.succeed(connection as PgliteConnection),
+        onNone: () => Effect.succeed(connection as PGliteConnection),
         onSome: ([conn]) => Effect.succeed(conn)
       })
     )
@@ -230,7 +322,7 @@ export const make = <O extends Pglite.PGliteOptions>(
         rollbackSavepoint: (id: string) => `ROLLBACK TO SAVEPOINT ${id}`,
         savepoint: (id: string) => `SAVEPOINT ${id}`,
         spanAttributes,
-        transactionAcquirer: Effect.succeed(connection as PgliteConnection), // Provide a direct acquirer for transactions
+        transactionAcquirer: Effect.succeed(connection as PGliteConnection), // Provide a direct acquirer for transactions
         transformRows
       }),
       {
@@ -273,3 +365,20 @@ export const layer = <O extends Pglite.PGliteOptions>(
         Context.add(SqlClient.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))
+
+/**
+ * @category custom types
+ * @since 1.0.0
+ */
+export type PgCustom = PgJson
+
+/**
+ * @category custom types
+ * @since 1.0.0
+ */
+interface PgJson extends Statement.Custom<"PgJson", unknown> {}
+/**
+ * @category custom types
+ * @since 1.0.0
+ */
+const PgJson = Statement.custom<PgJson>("PgJson")
