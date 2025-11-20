@@ -248,11 +248,11 @@ Question: ${question}
 
     const answerQuestion = (question: string) =>
       Effect.gen(function*() {
-        yield* Effect.logInfo(`Processing question: ${question}`)
+        yield* Effect.logDebug(`Processing question: ${question}`)
 
         // Step 1: Generate real embedding for the question
         const questionEmbedding = yield* embeddingModel.embed(question).pipe(
-          Effect.tap(() => Effect.logDebug("Generated embedding for question")),
+          Effect.tap(() => Effect.log("Generated embedding for question")),
           Effect.mapError((error) =>
             new EmbeddingError({
               message: `Failed to generate embedding for question: ${question}`,
@@ -263,13 +263,13 @@ Question: ${question}
 
         // Step 2: Semantic search in PGLite
         const type = inferEntityType(question)
-        yield* Effect.logDebug(`Inferred entity type: ${type || "none"}`)
+        yield* Effect.log(`Inferred entity type: ${type || "none"}`)
 
         const relevantContext = yield* vectorOps.semanticSearch(
           questionEmbedding,
           { filters: { type }, limit: 10, similarityThreshold: 0.3 }
         ).pipe(
-          Effect.tap((results) => Effect.logDebug(`Found ${results.length} relevant context items`)),
+          Effect.tap((results) => Effect.log(`Found ${results.length} relevant context items`)),
           Effect.mapError((error) =>
             new VectorStoreError({
               message: "Failed to perform semantic search",
@@ -285,7 +285,7 @@ Question: ${question}
 
         // Step 4: Get fresh structured data from main DB
         const structuredData = yield* fetchStructuredData(question, entityIds).pipe(
-          Effect.tap(() => Effect.logDebug("Fetched structured data for answer generation")),
+          Effect.tap(() => Effect.log("Fetched structured data for answer generation")),
           Effect.mapError((error) =>
             new DatabaseError({
               message: "Failed to fetch structured data for answer generation",
@@ -296,7 +296,7 @@ Question: ${question}
 
         // Step 5: Generate answer using LanguageModel
         const answer = yield* generateAnswer(question, relevantContext, structuredData).pipe(
-          Effect.tap(() => Effect.logDebug("Generated answer using language model")),
+          Effect.tap(() => Effect.log("Generated answer using language model")),
           Effect.mapError((error) =>
             new AIServiceError({
               message: "Failed to generate answer using language model",
@@ -305,7 +305,7 @@ Question: ${question}
           )
         )
 
-        yield* Effect.logInfo("Successfully answered question")
+        yield* Effect.logDebug("Successfully answered question")
         return answer
       })
 
@@ -393,11 +393,11 @@ Question: ${question}`
     // Data synchronization with real embeddings
     const syncDataToVectorStore = () =>
       Effect.gen(function*() {
-        yield* Effect.logInfo("Starting data synchronization to vector store")
+        yield* Effect.logDebug("Starting data synchronization to vector store")
 
         const [users, orders, products] = yield* Effect.all([
           db.getUsers().pipe(
-            Effect.tap(() => Effect.logDebug("Fetched users for sync")),
+            Effect.tap(() => Effect.log("Fetched users for sync")),
             Effect.mapError((error) =>
               new DatabaseError({
                 message: "Failed to fetch users for embedding sync",
@@ -406,7 +406,7 @@ Question: ${question}`
             )
           ),
           db.getOrders().pipe(
-            Effect.tap(() => Effect.logDebug("Fetched orders for sync")),
+            Effect.tap(() => Effect.log("Fetched orders for sync")),
             Effect.mapError((error) =>
               new DatabaseError({
                 message: "Failed to fetch orders for embedding sync",
@@ -415,7 +415,7 @@ Question: ${question}`
             )
           ),
           db.getProducts().pipe(
-            Effect.tap(() => Effect.logDebug("Fetched products for sync")),
+            Effect.tap(() => Effect.log("Fetched products for sync")),
             Effect.mapError((error) =>
               new DatabaseError({
                 message: "Failed to fetch products for embedding sync",
@@ -425,7 +425,7 @@ Question: ${question}`
           )
         ], { concurrency: 3 })
 
-        yield* Effect.logInfo(
+        yield* Effect.logDebug(
           `Processing ${users.length} users, ${orders.length} orders, ${products.length} products for embedding`
         )
 
@@ -437,7 +437,7 @@ Question: ${question}`
         ]
 
         const allEmbeddings = yield* embeddingModel.embedMany(texts).pipe(
-          Effect.tap(() => Effect.logDebug(`Generated embeddings for ${texts.length} items`)),
+          Effect.tap(() => Effect.log(`Generated embeddings for ${texts.length} items`)),
           Effect.retry({ schedule: Schedule.fixed(Duration.millis(100)), times: 2 }),
           Effect.mapError((error) =>
             new EmbeddingError({
@@ -488,7 +488,7 @@ Question: ${question}`
         })
 
         yield* vectorOps.storeEmbeddingBatch(batchItems).pipe(
-          Effect.tap(() => Effect.logInfo(`Stored ${batchItems.length} embeddings in vector store`)),
+          Effect.tap(() => Effect.logDebug(`Stored ${batchItems.length} embeddings in vector store`)),
           Effect.mapError((error) =>
             new VectorStoreError({
               message: "Failed to store embeddings in vector store",
@@ -497,7 +497,7 @@ Question: ${question}`
           )
         )
 
-        yield* Effect.logInfo("Data synchronization completed successfully")
+        yield* Effect.logDebug("Data synchronization completed successfully")
         return {
           users: users.length,
           orders: orders.length,

@@ -1,6 +1,6 @@
 import { SqlClient } from "@effect/sql"
 import { LibsqlClient } from "@effect/sql-libsql"
-import { Effect, Layer, pipe, String } from "effect"
+import { Effect, Layer, Logger, LogLevel, pipe, String } from "effect"
 
 export const App = Effect.scoped(Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
@@ -52,5 +52,6 @@ pipe(
     onFailure: (error) => Effect.sync(() => console.error("💥 Error:", error)),
     onSuccess: (result) => Effect.sync(() => console.log(result))
   }),
+  Logger.withMinimumLogLevel(LogLevel.Debug),
   Effect.runPromise
 )

@@ -1,7 +1,7 @@
 import { SqlClient } from "@effect/sql"
 import { NodeFS } from "@electric-sql/pglite/nodefs"
 import { vector } from "@electric-sql/pglite/vector"
-import { Effect, Layer, pipe, String } from "effect"
+import { Effect, Layer, Logger, LogLevel, pipe, String } from "effect"
 import { PGliteClient } from "./PGlite/index.js"
 
 export const App = Effect.scoped(Effect.gen(function*() {
@@ -63,5 +63,6 @@ pipe(
     onFailure: (error) => Effect.sync(() => Effect.logError(`💥 Error: ${error}`)),
     onSuccess: (result) => Effect.sync(() => Effect.logInfo(result))
   }),
+  Logger.withMinimumLogLevel(LogLevel.Debug),
   Effect.runPromise
 )

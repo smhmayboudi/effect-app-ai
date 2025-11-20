@@ -3,7 +3,7 @@ import { NodeHttpClient } from "@effect/platform-node"
 import { SqlClient } from "@effect/sql"
 import { NodeFS } from "@electric-sql/pglite/nodefs"
 import { vector } from "@electric-sql/pglite/vector"
-import { Config, Effect, Layer, pipe, String } from "effect"
+import { Config, Effect, Layer, Logger, LogLevel, pipe, String } from "effect"
 import { BusinessIntelligenceService } from "./BusinessIntelligenceService.js"
 import { AIServiceError, BusinessLogicError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
@@ -270,5 +270,6 @@ pipe(
     onFailure: (error) => Effect.sync(() => Effect.logError(`💥 BI Error: ${error}`)),
     onSuccess: (result) => Effect.sync(() => Effect.logInfo(result))
   }),
+  Logger.withMinimumLogLevel(LogLevel.Debug),
   Effect.runPromise
 )
