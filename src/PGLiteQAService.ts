@@ -16,7 +16,11 @@ import {
 
 export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQAService", {
   effect: Effect.gen(function*() {
-    type StructuredData = { users?: Array<User>; orders?: Array<Order>; products?: Array<Product> }
+    type StructuredData = {
+      users?: Array<User> | undefined
+      orders?: Array<Order> | undefined
+      products?: Array<Product> | undefined
+    }
 
     const db = yield* MockDatabaseService
     const vectorOps = yield* PGLiteVectorOps
@@ -34,88 +38,80 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
 
     const fetchStructuredData = (question: string, entityIds: Array<string>) =>
       Effect.gen(function*() {
-        if (entityIds.length === 0) {
-          // If no specific entities, try to infer from question
-          const entityType = inferEntityType(question)
-
-          if (entityType === "user") {
-            return { users: yield* db.getUsers() }
-          } else if (entityType === "order") {
-            return { orders: yield* db.getOrders() }
-          } else if (entityType === "product") {
-            return { products: yield* db.getProducts() }
-          }
-
-          // Return all data if no specific type inferred
-          const [users, orders, products] = yield* Effect.all([
-            db.getUsers().pipe(
-              Effect.mapError((error) =>
-                new DatabaseError({
-                  message: "Failed to fetch users for structured data",
-                  cause: error
-                })
-              )
-            ),
-            db.getOrders().pipe(
-              Effect.mapError((error) =>
-                new DatabaseError({
-                  message: "Failed to fetch orders for structured data",
-                  cause: error
-                })
-              )
-            ),
-            db.getProducts().pipe(
-              Effect.mapError((error) =>
-                new DatabaseError({
-                  message: "Failed to fetch products for structured data",
-                  cause: error
-                })
-              )
-            )
-          ], { concurrency: 3 })
-
-          return { users, orders, products } as StructuredData
-        }
-
         // Filter by specific entity IDs
         const entityType = inferEntityType(question)
 
-        const data: StructuredData = {}
-
-        if (entityType === "user" || !entityType) {
-          data.users = yield* db.getUsers({ ids: entityIds }).pipe(
-            Effect.mapError((error) =>
-              new DatabaseError({
-                message: "Failed to fetch users by IDs for structured data",
-                cause: error
-              })
-            )
-          )
+        if (entityIds.length === 0) {
+          return yield* Effect.all({
+            users: (!entityType || entityType === "user")
+              ? db.getUsers().pipe(
+                Effect.mapError((error) =>
+                  new DatabaseError({
+                    message: "Failed to fetch users for structured data",
+                    cause: error
+                  })
+                )
+              )
+              : Effect.succeed(undefined),
+            orders: (!entityType || entityType === "order")
+              ? db.getOrders().pipe(
+                Effect.mapError((error) =>
+                  new DatabaseError({
+                    message: "Failed to fetch orders for structured data",
+                    cause: error
+                  })
+                )
+              )
+              : Effect.succeed(undefined),
+            products: (!entityType || entityType === "product")
+              ? db.getProducts().pipe(
+                Effect.mapError((error) =>
+                  new DatabaseError({
+                    message: "Failed to fetch products for structured data",
+                    cause: error
+                  })
+                )
+              )
+              : Effect.succeed(undefined)
+          }, {
+            concurrency: 3
+          })
         }
 
-        if (entityType === "order" || !entityType) {
-          data.orders = yield* db.getOrders({ ids: entityIds }).pipe(
-            Effect.mapError((error) =>
-              new DatabaseError({
-                message: "Failed to fetch orders by IDs for structured data",
-                cause: error
-              })
+        return yield* Effect.all({
+          users: (!entityType || entityType === "user")
+            ? db.getUsers({ ids: entityIds }).pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch users by IDs for structured data",
+                  cause: error
+                })
+              )
             )
-          )
-        }
-
-        if (entityType === "product" || !entityType) {
-          data.products = yield* db.getProducts({ ids: entityIds }).pipe(
-            Effect.mapError((error) =>
-              new DatabaseError({
-                message: "Failed to fetch products by IDs for structured data",
-                cause: error
-              })
+            : Effect.succeed(undefined),
+          orders: (!entityType || entityType === "order")
+            ? db.getOrders({ ids: entityIds }).pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch orders by IDs for structured data",
+                  cause: error
+                })
+              )
             )
-          )
-        }
-
-        return data
+            : Effect.succeed(undefined),
+          products: (!entityType || entityType === "product")
+            ? db.getProducts({ ids: entityIds }).pipe(
+              Effect.mapError((error) =>
+                new DatabaseError({
+                  message: "Failed to fetch products by IDs for structured data",
+                  cause: error
+                })
+              )
+            )
+            : Effect.succeed(undefined)
+        }, {
+          concurrency: 3
+        })
       })
 
     const generateAnswer = (
@@ -178,9 +174,10 @@ Question: ${question}
         )
 
         return yield* Effect.try({
-          try: () => JSON.parse(response.text) as Array<string>,
+          try: () => [...JSON.parse(response.text), question] as Array<string>,
           catch: (error) => {
-            console.warn("Failed to parse query variations, using original question:", error)
+            console.error("⛔️ Failed to parse query variations, using original question:", error)
+
             return [question]
           }
         })
@@ -221,7 +218,7 @@ Question: ${question}
 
         const similarToProfile = yield* vectorOps.semanticSearch(
           avgEmbedding,
-          { filters: { type: "product" } }
+          { filters: { type: "product" }, limit: 10, similarityThreshold: 0.3 }
         ).pipe(
           Effect.mapError((error) =>
             new VectorStoreError({
@@ -267,15 +264,12 @@ Question: ${question}
         )
 
         // Step 2: Semantic search in PGLite
-        const inferEntityTypeFromQuestion = inferEntityType(question)
-        yield* logger.debug(`Inferred entity type: ${inferEntityTypeFromQuestion || "none"}`)
+        const type = inferEntityType(question)
+        yield* logger.debug(`Inferred entity type: ${type || "none"}`)
 
         const relevantContext = yield* vectorOps.semanticSearch(
           questionEmbedding,
-          {
-            similarityThreshold: 0.3,
-            filters: { ...(inferEntityTypeFromQuestion ? { type: inferEntityTypeFromQuestion } : {}) }
-          }
+          { filters: { type }, limit: 10, similarityThreshold: 0.3 }
         ).pipe(
           Effect.tap((results) => logger.debug(`Found ${results.length} relevant context items`)),
           Effect.mapError((error) =>
@@ -321,7 +315,7 @@ Question: ${question}
     const enhancedSemanticSearch = (question: string) =>
       Effect.gen(function*() {
         // Generate multiple query variations for better search
-        const queryVariations = [...yield* generateQueryVariations(question), question]
+        const queryVariations = yield* generateQueryVariations(question)
 
         const allResults = yield* Effect.all(
           queryVariations.map((variation) =>
@@ -336,7 +330,7 @@ Question: ${question}
               )
               return yield* vectorOps.semanticSearch(
                 embedding,
-                { limit: 3, similarityThreshold: 0.3 }
+                { filters: {}, limit: 3, similarityThreshold: 0.3 }
               ).pipe(
                 Effect.mapError((error) =>
                   new VectorStoreError({
@@ -439,17 +433,9 @@ Question: ${question}`
 
         // Batch process embeddings
         const texts = [
-          ...users.map((user) =>
-            `User ID: ${user.id}, User: ${user.name}, User Email: ${user.email}, User Role: ${user.role}, User Department: ${user.department}`
-          ),
-          ...orders.map((order) =>
-            `Order ID: ${order.id}, Order Description: ${order.description}, Order Status: ${order.status}, Order Customer ID: ${order.customer_id}, Order Amount: $${order.amount}, Created: ${
-              order.created_at.toISOString().split("T")[0]
-            }`
-          ),
-          ...products.map((product) =>
-            `Product ID: ${product.id}, Product Description: ${product.description}, Product Name: ${product.name}, Product Category: ${product.category}, Product Price: $${product.price}`
-          )
+          ...users.map((user) => JSON.stringify(user)),
+          ...orders.map((order) => JSON.stringify(order)),
+          ...products.map((product) => JSON.stringify(product))
         ]
 
         const allEmbeddings = yield* embeddingModel.embedMany(texts).pipe(
@@ -469,36 +455,36 @@ Question: ${question}`
 
         users.forEach((user) => {
           batchItems.push(EmbeddingInputSchema.make({
-            id: `user_${user.id}`,
             content: texts[embeddingIndex],
             embedding: allEmbeddings[embeddingIndex],
-            type: "user",
             entity_id: user.id.toString(),
-            metadata: user
+            id: `user_${user.id}`,
+            metadata: user,
+            type: "user"
           }))
           embeddingIndex++
         })
 
         orders.forEach((order) => {
           batchItems.push(EmbeddingInputSchema.make({
-            id: `order_${order.id}`,
             content: texts[embeddingIndex],
             embedding: allEmbeddings[embeddingIndex],
-            type: "order",
             entity_id: order.id.toString(),
-            metadata: order
+            id: `order_${order.id}`,
+            metadata: order,
+            type: "order"
           }))
           embeddingIndex++
         })
 
         products.forEach((product) => {
           batchItems.push(EmbeddingInputSchema.make({
-            id: `product_${product.id}`,
             content: texts[embeddingIndex],
             embedding: allEmbeddings[embeddingIndex],
-            type: "product",
             entity_id: product.id.toString(),
-            metadata: product
+            id: `product_${product.id}`,
+            metadata: product,
+            type: "product"
           }))
           embeddingIndex++
         })
