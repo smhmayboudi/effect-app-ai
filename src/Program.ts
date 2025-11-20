@@ -6,7 +6,6 @@ import { vector } from "@electric-sql/pglite/vector"
 import { Config, Layer, pipe, String } from "effect"
 import * as Effect from "effect/Effect"
 import { AIServiceError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
-import { LoggerLive } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
 import { PGliteClient } from "./PGlite/index.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
@@ -16,10 +15,10 @@ import { PGLiteVectorOps } from "./PGLiteVectorOps.js"
 export const realEmbeddingsProgram = Effect.gen(function*() {
   const qaService = yield* PGLiteQAService
 
-  console.log("📊 Initializing Q&A Service with Real Embeddings...")
+  yield* Effect.logInfo("📊 Initializing Q&A Service with Real Embeddings...")
 
   // Sync data with real embeddings
-  console.log("🔄 Syncing data with real embeddings...")
+  yield* Effect.logInfo("🔄 Syncing data with real embeddings...")
   const syncResult = yield* qaService.syncDataToVectorStore().pipe(
     Effect.catchAll((error) => {
       if (error instanceof DatabaseError) {
@@ -36,7 +35,9 @@ export const realEmbeddingsProgram = Effect.gen(function*() {
       return Effect.die(error)
     })
   )
-  console.log(`✅ Synced: ${syncResult.users} users, ${syncResult.orders} orders, ${syncResult.products} products`)
+  yield* Effect.logInfo(
+    `✅ Synced: ${syncResult.users} users, ${syncResult.orders} orders, ${syncResult.products} products`
+  )
 
   // Test questions that benefit from semantic search
   const testQuestions = [
@@ -49,7 +50,7 @@ export const realEmbeddingsProgram = Effect.gen(function*() {
   ]
 
   for (const question of testQuestions) {
-    console.log(`\n❓ Question: ${question}`)
+    yield* Effect.logInfo(`❓ Question: ${question}`)
 
     // Use enhanced semantic search for better results
     const enhancedResults = yield* qaService.enhancedSemanticSearch(question).pipe(
@@ -68,7 +69,7 @@ export const realEmbeddingsProgram = Effect.gen(function*() {
         return Effect.succeed([])
       })
     )
-    console.log(`🔍 Found ${enhancedResults.length} relevant items via semantic search`)
+    yield* Effect.logInfo(`🔍 Found ${enhancedResults.length} relevant items via semantic search`)
 
     const answer = yield* qaService.answerQuestion(question).pipe(
       Effect.catchAll((error) => {
@@ -86,7 +87,7 @@ export const realEmbeddingsProgram = Effect.gen(function*() {
         return Effect.succeed("I'm sorry, an unexpected error occurred.")
       })
     )
-    console.log(`🤖 Answer: ${answer}\n`)
+    yield* Effect.logInfo(`🤖 Answer: ${answer}\n`)
 
     // yield* Effect.sleep(Duration.seconds(1)) // Rate limiting for API
   }
@@ -104,7 +105,7 @@ export const realEmbeddingsProgram = Effect.gen(function*() {
       return Effect.succeed([])
     })
   )
-  console.log(`😇 Recommendations for customer id 1:`, recommendations)
+  yield* Effect.logInfo(`😇 Recommendations for customer id 1:`, recommendations)
 
   return "🎉 Real embeddings demonstration completed successfully!"
 })
@@ -174,24 +175,24 @@ const Sql = Migrator.pipe(Layer.provideMerge(Client))
 // Create the core application layers
 const CoreLayers = Layer.mergeAll(
   MockDatabaseService.Default,
-  PGLiteVectorOps.Default.pipe(Layer.provide(Sql)),
-  LoggerLive
+  PGLiteVectorOps.Default.pipe(Layer.provide(Sql))
 )
 
 // Create the complete application layer by merging all dependencies
 const AppLayer = Layer.provide(
   PGLiteQAService.Default,
   CoreLayers
+).pipe(
+  Layer.provide(AiLayers)
 )
 
 // Run with real embeddings
 pipe(
   realEmbeddingsProgram,
   Effect.provide(AppLayer),
-  Effect.provide(AiLayers),
   Effect.tapBoth({
-    onFailure: (error) => Effect.sync(() => console.error("💥 Error:", error)),
-    onSuccess: (result) => Effect.sync(() => console.log(result))
+    onFailure: (error) => Effect.sync(() => Effect.logError(`💥 Error: ${error}`)),
+    onSuccess: (result) => Effect.sync(() => Effect.logInfo(result))
   }),
   Effect.runPromise
 )

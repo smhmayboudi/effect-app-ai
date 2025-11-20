@@ -18,7 +18,7 @@ export const App = Effect.scoped(Effect.gen(function*() {
     JOIN movies ON movies.rowid = knn.id
     WHERE year >= 2020;
   `
-  console.log({ a })
+  yield* Effect.logInfo(a)
 }))
 
 export const Migrator = Layer.effectDiscard(

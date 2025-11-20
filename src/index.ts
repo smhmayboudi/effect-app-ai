@@ -8,9 +8,6 @@ export * as CacheService from "./CacheService.js"
 export * as Errors from "./Errors.js"
 
 
-export * as Logging from "./Logging.js"
-
-
 export * as MockDatabaseService from "./MockDatabaseService.js"
 
 
@@ -37,6 +34,12 @@ export * as Program2 from "./Program2.js"
 
 
 export * as Program3 from "./Program3.js"
+
+
+export * as Program4 from "./Program4.js"
+
+
+export * as Program5 from "./Program5.js"
 
 
 export * as QueryDebounceService from "./QueryDebounceService.js"

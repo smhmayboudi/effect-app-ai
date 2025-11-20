@@ -23,9 +23,9 @@ export const App = Effect.scoped(Effect.gen(function*() {
       ).join(", ")
     )
   }`
-  console.log({ a })
+  yield* Effect.logInfo(a)
   const b = yield* sql`SELECT * FROM embeddings`
-  console.log({ b })
+  yield* Effect.logInfo(b)
 }))
 
 export const Migrator = Layer.effectDiscard(
@@ -60,8 +60,8 @@ pipe(
   App,
   Effect.provide(Migrator.pipe(Layer.provideMerge(Client))),
   Effect.tapBoth({
-    onFailure: (error) => Effect.sync(() => console.error("💥 Error:", error)),
-    onSuccess: (result) => Effect.sync(() => console.log(result))
+    onFailure: (error) => Effect.sync(() => Effect.logError(`💥 Error: ${error}`)),
+    onSuccess: (result) => Effect.sync(() => Effect.logInfo(result))
   }),
   Effect.runPromise
 )

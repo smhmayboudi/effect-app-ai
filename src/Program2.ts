@@ -6,7 +6,6 @@ import { vector } from "@electric-sql/pglite/vector"
 import { Config, Effect, Layer, pipe, String } from "effect"
 import { BusinessIntelligenceService } from "./BusinessIntelligenceService.js"
 import { AIServiceError, BusinessLogicError, DatabaseError, EmbeddingError, VectorStoreError } from "./Errors.js"
-import { LoggerLive } from "./Logging.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
 import { PGliteClient } from "./PGlite/index.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
@@ -16,7 +15,7 @@ const biDemoProgram = Effect.gen(function*() {
   const biService = yield* BusinessIntelligenceService
   const qaService = yield* PGLiteQAService
 
-  console.log("📈 Business Intelligence Demo Starting...")
+  yield* Effect.logInfo("📈 Business Intelligence Demo Starting...")
 
   // Sync data first
   yield* qaService.syncDataToVectorStore().pipe(
@@ -37,7 +36,7 @@ const biDemoProgram = Effect.gen(function*() {
   )
 
   // 1. Get comprehensive dashboard
-  console.log("📊 Generating KPI Dashboard...")
+  yield* Effect.logInfo("📊 Generating KPI Dashboard...")
   const dashboard = yield* biService.getKPIDashboard().pipe(
     Effect.catchAll((error) => {
       if (error instanceof DatabaseError) {
@@ -84,7 +83,7 @@ const biDemoProgram = Effect.gen(function*() {
       })
     })
   )
-  console.log("Dashboard Overview:", dashboard.overview)
+  yield* Effect.logInfo("Dashboard Overview:", dashboard.overview)
 
   // 2. Natural language queries to insights
   const nlQueries = [
@@ -95,7 +94,7 @@ const biDemoProgram = Effect.gen(function*() {
   ]
 
   for (const query of nlQueries) {
-    console.log(`\n🗣️  NL Query: "${query}"`)
+    yield* Effect.logInfo(`\n🗣️  NL Query: "${query}"`)
     const result = yield* biService.naturalLanguageToDashboard(query).pipe(
       Effect.catchAll((error) => {
         if (error instanceof AIServiceError) {
@@ -136,12 +135,12 @@ const biDemoProgram = Effect.gen(function*() {
         })
       })
     )
-    console.log(`📈 Visualization Type: ${result.visualizationType}`)
-    console.log(`💡 Insights: ${result.insights}`)
+    yield* Effect.logInfo(`📈 Visualization Type: ${result.visualizationType}`)
+    yield* Effect.logInfo(`💡 Insights: ${result.insights}`)
   }
 
   // 3. Customer segmentation
-  console.log("\n👥 Analyzing Customer Segments...")
+  yield* Effect.logInfo("\n👥 Analyzing Customer Segments...")
   const segments = yield* biService.segmentCustomers().pipe(
     Effect.catchAll((error) => {
       if (error instanceof AIServiceError) {
@@ -155,10 +154,10 @@ const biDemoProgram = Effect.gen(function*() {
       return Effect.succeed({ segments: {}, statistics: {}, recommendations: [] })
     })
   )
-  console.log("Customer Segments:", Object.keys(segments.segments))
+  yield* Effect.logInfo("Customer Segments:", Object.keys(segments.segments))
 
   // 4. Automated insights
-  console.log("\n🔍 Generating Automated Business Insights...")
+  yield* Effect.logInfo("\n🔍 Generating Automated Business Insights...")
   const insights = yield* biService.generateBusinessInsights().pipe(
     Effect.catchAll((error) => {
       if (error instanceof BusinessLogicError) {
@@ -169,11 +168,13 @@ const biDemoProgram = Effect.gen(function*() {
       return Effect.succeed([])
     })
   )
-  insights.forEach((insight) => {
-    console.log(`\n⚠️  ${insight.title} (${insight.severity})`)
-    console.log(`   ${insight.description}`)
-    insight.recommendations.forEach((rec) => console.log(`   💡 ${rec}`))
-  })
+  yield* Effect.forEach(insights, (insight) =>
+    Effect.logInfo(`\n⚠️\t${insight.title} (${insight.severity})`).pipe(
+      Effect.andThen(Effect.logInfo(`\t${insight.description}`)),
+      Effect.andThen(
+        Effect.forEach(insight.recommendations, (rec) => Effect.logInfo(`\t💡 ${rec}`))
+      )
+    ))
 
   return "🎯 Business Intelligence demo completed!"
 })
@@ -243,34 +244,31 @@ const Sql = Migrator.pipe(Layer.provideMerge(Client))
 // Create the core application layers
 const CoreLayers = Layer.mergeAll(
   MockDatabaseService.Default,
-  PGLiteVectorOps.Default.pipe(Layer.provide(Sql)),
-  LoggerLive
+  PGLiteVectorOps.Default.pipe(Layer.provide(Sql))
 )
 
 // Create the complete application layer by merging all dependencies
 const AppLayer = Layer.provide(
   PGLiteQAService.Default,
   CoreLayers
+).pipe(
+  Layer.provide(AiLayers)
 )
 
 // Add to your layer configuration
 const BILayer = BusinessIntelligenceService.Default.pipe(
   Layer.provide(MockDatabaseService.Default)
+).pipe(
+  Layer.provideMerge(AppLayer)
 )
 
 // Run the BI demo
 pipe(
   biDemoProgram,
   Effect.provide(BILayer),
-  Effect.provide(AppLayer),
-  Effect.provide(AiLayers),
-  Effect.provide(PGliteClient.layer({
-    extensions: { vector },
-    fs: new NodeFS("./data/")
-  })),
   Effect.tapBoth({
-    onFailure: (error) => Effect.sync(() => console.error("💥 BI Error:", error)),
-    onSuccess: (result) => Effect.sync(() => console.log(result))
+    onFailure: (error) => Effect.sync(() => Effect.logError(`💥 BI Error: ${error}`)),
+    onSuccess: (result) => Effect.sync(() => Effect.logInfo(result))
   }),
   Effect.runPromise
 )
