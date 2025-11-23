@@ -7,7 +7,6 @@ import type * as SqlConnection from "@effect/sql/SqlConnection"
 import * as SqlError from "@effect/sql/SqlError"
 import * as Statement from "@effect/sql/Statement"
 import * as Pglite from "@electric-sql/pglite"
-import type * as basefs from "@electric-sql/pglite/basefs"
 import * as Config from "effect/Config"
 import type * as ConfigError from "effect/ConfigError"
 import * as Context from "effect/Context"
@@ -18,6 +17,16 @@ import * as Scope from "effect/Scope"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
 
+type PGliteConnection = SqlConnection.Connection
+
+const PgliteTransaction = Context.GenericTag<readonly [PGliteConnection, counter: number]>(
+  "@effect/sql-pglite/PgliteClient/PgliteTransaction"
+)
+
+/**
+ * @category type models
+ * @since 1.0.0
+ */
 export type PGlite<O extends Pglite.PGliteOptions> = Pglite.PGlite & Pglite.PGliteInterfaceExtensions<O["extensions"]>
 
 /**
@@ -39,6 +48,9 @@ export type TypeId = typeof TypeId
 export interface PgliteClient<O extends Pglite.PGliteOptions = Pglite.PGliteOptions> extends SqlClient.SqlClient {
   readonly [TypeId]: TypeId
   readonly config: PgliteClientConfig<O>
+  // readonly json: (_: unknown) => Statement.Fragment
+  // readonly listen: (channel: string) => Stream.Stream<string, SqlError.SqlError>
+  // readonly notify: (channel: string, payload: string) => Effect.Effect<void, SqlError.SqlError>
 }
 
 /**
@@ -47,43 +59,19 @@ export interface PgliteClient<O extends Pglite.PGliteOptions = Pglite.PGliteOpti
  */
 export const PgliteClient = Context.GenericTag<PgliteClient>("@effect/sql-pglite/PgliteClient")
 
-const PgliteTransaction = Context.GenericTag<readonly [PGliteConnection, counter: number]>(
-  "@effect/sql-pglite/PgliteClient/PgliteTransaction"
-)
-
 /**
  * @category models
  * @since 1.0.0
  */
-export interface PgliteClientConfig<O extends Pglite.PGliteOptions> {
+export interface PgliteClientConfig<O extends Pglite.PGliteOptions> extends Pglite.PGliteOptions {
   readonly spanAttributes?: Record<string, unknown> | undefined
   readonly transformResultNames?: ((str: string) => string) | undefined
   readonly transformQueryNames?: ((str: string) => string) | undefined
   readonly transformJson?: boolean | undefined
 
-  dataDir?: string
-  username?: string
-  database?: string
-  fs?: basefs.Filesystem
-  debug?: Pglite.DebugLevel
-  relaxedDurability?: boolean
-  extensions?: Pglite.Extensions
-  loadDataDir?: Blob | File
-  initialMemory?: number
-  wasmModule?: WebAssembly.Module
-  fsBundle?: Blob | File
-  parsers?: Pglite.ParserOptions
-  serializers?: Pglite.SerializerOptions
-
   readonly liveClient?: PGlite<O>
 }
 
-type PGliteConnection = SqlConnection.Connection
-
-/**
- * @category constructor
- * @since 1.0.0
- */
 const makeCompiler = (
   transform?: (_: string) => string,
   transformJson = true
@@ -100,8 +88,6 @@ const makeCompiler = (
       placeholder,
       withoutTransform
     ) => {
-      console.log({ type, placeholder, withoutTransform })
-      // throw new Error("onCustom not implemented for PGlite")
       switch (type.kind) {
         case "PgJson": {
           return [
@@ -123,63 +109,78 @@ const makeCompiler = (
       values,
       returning
     ) => {
-      const sql = `(${columns.join(", ")}) VALUES ${placeholders}${returning ? ` RETURNING ${returning[0]}` : ""}`
-      const vals = values.flat().map((a) =>
-        typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+      const sql = `(${columns.join(",")}) VALUES ${placeholders}${returning ? ` RETURNING ${returning[0]}` : ""}`
+      const params = values.flat().map((a) =>
+        typeof a === "boolean" || typeof a === "number" || typeof a === "string" || !(a instanceof Array)
           ? a
-          : JSON.stringify(a)
+          : `${JSON.stringify(a)}`
       )
 
-      return [sql, returning ? vals.concat(returning[1] as any) : vals]
+      return [sql, returning ? params.concat(returning[1] as any) : params]
     },
     onRecordUpdate: (
       _placeholders,
       _alias,
-      columns,
+      cols,
       values,
       returning
     ) => {
+      const columns = cols.slice(1, cols.length - 1).split(",")
       const ids = values.map((row) => row[0])
-      const columnNames = columns.slice(1, columns.length - 1).split(",")
-      const setClauses = columnNames
+      const setClauses = columns
         .filter((col) => col !== "id")
         .map((col) => {
-          const cases = values.map((row, index) => {
-            const valueIndex = columnNames.indexOf(col)
-            return `WHEN id = $${index * columnNames.length + 1} THEN $${index * columnNames.length + valueIndex + 1}`
+          const cases = values.map((_row, index) => {
+            const valueIndex = columns.indexOf(col)
+            return `WHEN id = $${index * columns.length + 1} THEN $${index * columns.length + valueIndex + 1}`
           }).join(" ")
 
           return `${col} = CASE ${cases} ELSE ${col} END`
         })
-        .join(", ")
-      const sql = `${setClauses} WHERE id IN (${ids.map((_, i) => `$${i * columnNames.length + 1}`).join(", ")})${
+        .join(",")
+      const sql = `${setClauses} WHERE id IN (${ids.map((_, i) => `$${i * columns.length + 1}`).join(",")})${
         returning ? ` RETURNING ${returning[0]}` : ""
       }`.trim()
-      const vals = values.flat().map((a) =>
-        typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+      const params = values.flat().map((a) =>
+        typeof a === "boolean" || typeof a === "number" || typeof a === "string" || !(a instanceof Array)
           ? a
-          : JSON.stringify(a)
+          : `${JSON.stringify(a)}`
       )
 
-      return [sql, returning ? vals.concat(returning[1] as any) : vals]
+      return [sql, returning ? params.concat(returning[1] as any) : params]
     },
     onRecordUpdateSingle: (
       columns,
-      values,
+      vals,
       returning
     ) => {
-      const sql = `${columns.map((a, i) => `${a}=$${i + 1}`).join(", ")}${
+      const values = [vals]
+      const ids = values.map((row) => row[0])
+      const setClauses = columns
+        .filter((col) => col !== "id")
+        .map((col) => {
+          const cases = values.map((_row, index) => {
+            const valueIndex = columns.indexOf(col)
+            return `WHEN id = $${index * columns.length + 1} THEN $${index * columns.length + valueIndex + 1}`
+          }).join(" ")
+
+          return `${col} = CASE ${cases} ELSE ${col} END`
+        })
+        .join(",")
+      const sql = `${setClauses} WHERE id IN (${ids.map((_, i) => `$${i * columns.length + 1}`).join(",")})${
         returning ? ` RETURNING ${returning[0]}` : ""
-      }`
-      const vals = values.map((a) =>
-        typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+      }`.trim()
+      const params = values.flat().map((a) =>
+        typeof a === "boolean" || typeof a === "number" || typeof a === "string" || !(a instanceof Array)
           ? a
-          : JSON.stringify(a)
+          : `${JSON.stringify(a)}`
       )
 
-      return [sql, returning ? vals.concat(returning[1] as any) : vals]
+      return [sql, returning ? params.concat(returning[1] as any) : params]
     },
-    placeholder: (index, _value) => `$${index}`
+    placeholder: (index, _value) => {
+      return `$${index}`
+    }
   })
 }
 
@@ -217,7 +218,7 @@ export const make = <O extends Pglite.PGliteOptions>(
         return Effect.map(
           Effect.tryPromise({
             try: () => this.sdk.query(sql, params as Array<any>),
-            catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to execute statement" })
+            catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to run statement" })
           }),
           (results) => results.rows
         )
@@ -229,7 +230,7 @@ export const make = <O extends Pglite.PGliteOptions>(
       ) {
         return Effect.tryPromise({
           try: () => this.sdk.query(sql, params as Array<any>),
-          catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to execute statement" })
+          catch: (cause) => new SqlError.SqlError({ cause, message: "Failed to runRaw statement" })
         })
       }
 
@@ -239,16 +240,30 @@ export const make = <O extends Pglite.PGliteOptions>(
         transformRows: (<A extends object>(row: ReadonlyArray<A>) => ReadonlyArray<A>) | undefined
       ): Effect.Effect<ReadonlyArray<any>, SqlError.SqlError> {
         return transformRows
-          ? Effect.map(this.run(sql, params), transformRows as any)
-          : this.run(sql, params)
+          ? Effect.map(
+            this.run(sql, params).pipe(
+              Effect.mapError((cause) => new SqlError.SqlError({ cause, message: "Failed to execute statement" }))
+            ),
+            transformRows as any
+          )
+          : this.run(sql, params).pipe(
+            Effect.mapError((cause) => new SqlError.SqlError({ cause, message: "Failed to execute statement" }))
+          )
       }
 
       executeRaw(sql: string, params: ReadonlyArray<unknown>) {
-        return this.runRaw(sql, params)
+        return this.runRaw(sql, params).pipe(
+          Effect.mapError((cause) => new SqlError.SqlError({ cause, message: "Failed to executeRaw statement" }))
+        )
       }
 
       executeValues(sql: string, params: ReadonlyArray<unknown>) {
-        return Effect.map(this.run(sql, params), (rows) => rows.map((row) => Array.from(row as any) as Array<any>))
+        return Effect.map(
+          this.run(sql, params).pipe(
+            Effect.mapError((cause) => new SqlError.SqlError({ cause, message: "Failed to executeValues statement" }))
+          ),
+          (rows) => rows.map((row) => Array.from(row as any) as Array<any>)
+        )
       }
 
       executeUnprepared(
@@ -256,7 +271,9 @@ export const make = <O extends Pglite.PGliteOptions>(
         params: ReadonlyArray<unknown>,
         transformRows: (<A extends object>(row: ReadonlyArray<A>) => ReadonlyArray<A>) | undefined
       ) {
-        return this.execute(sql, params, transformRows)
+        return this.execute(sql, params, transformRows).pipe(
+          Effect.mapError((cause) => new SqlError.SqlError({ cause, message: "Failed to executeUnprepared statement" }))
+        )
       }
 
       executeStream() {
