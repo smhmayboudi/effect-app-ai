@@ -1,8 +1,15 @@
+/**
+ * @since 1.0.0
+ * @category models
+ */
+
 import { Duration, Effect } from "effect"
 import { DatabaseError } from "./Errors.js"
 import type { Order, Product, User } from "./Schemas.js"
 
-// Mock data
+/**
+ * @description Mock users data for testing and development
+ */
 const mockUsers: Array<User> = [
   { id: 1, name: "John Doe", email: "john@company.com", role: "admin", department: "IT" },
   { id: 2, name: "Jane Smith", email: "jane@company.com", role: "user", department: "Sales" },
@@ -11,6 +18,9 @@ const mockUsers: Array<User> = [
   { id: 5, name: "Charlie Wilson", email: "charlie@company.com", role: "user", department: "Sales" }
 ]
 
+/**
+ * @description Mock orders data for testing and development
+ */
 const mockOrders: Array<Order> = [
   {
     id: 1,
@@ -54,6 +64,9 @@ const mockOrders: Array<Order> = [
   }
 ]
 
+/**
+ * @description Mock products data for testing and development
+ */
 const mockProducts: Array<Product> = [
   {
     id: 1,
@@ -68,9 +81,18 @@ const mockProducts: Array<Product> = [
   { id: 5, name: "Basic Plan", category: "subscription", price: 5000, description: "Entry-level business tools" }
 ]
 
-// Mock Database Service Implementation
+/**
+ * @since 1.0.0
+ * @category models
+ * @description Mock Database Service Implementation for testing and development
+ */
 export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("DatabaseService", {
   effect: Effect.succeed({
+    /**
+     * @description Gets users from the mock database with optional filters
+     * @param filters Optional filters to apply to the user query (by id, role, or department)
+     * @returns Array of users matching the filters
+     */
     getUsers: (filters?: { ids?: Array<string>; role?: string; department?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
@@ -101,6 +123,11 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         }
       }),
 
+    /**
+     * @description Gets orders from the mock database with optional filters
+     * @param filters Optional filters to apply to the order query (by id, customer_id, or status)
+     * @returns Array of orders matching the filters
+     */
     getOrders: (filters?: { ids?: Array<string>; customer_id?: number; status?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
@@ -131,6 +158,11 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         }
       }),
 
+    /**
+     * @description Gets products from the mock database with optional filters
+     * @param filters Optional filters to apply to the product query (by id or category)
+     * @returns Array of products matching the filters
+     */
     getProducts: (filters?: { ids?: Array<string>; category?: string }) =>
       Effect.gen(function*() {
         // Simulate async database call
@@ -157,6 +189,11 @@ export class MockDatabaseService extends Effect.Service<MockDatabaseService>()("
         }
       }),
 
+    /**
+     * @description Gets user statistics from the mock database
+     * @param userId The ID of the user to get statistics for
+     * @returns User statistics including total orders and total amount spent
+     */
     getUserStats: (userId: number) =>
       Effect.gen(function*() {
         // Simulate async database call

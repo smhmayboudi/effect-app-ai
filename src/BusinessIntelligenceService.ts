@@ -1,16 +1,29 @@
+/**
+ * @since 1.0.0
+ * @category models
+ */
+
 import { Effect } from "effect"
 import { AIServiceError, BusinessLogicError, DatabaseError } from "./Errors.js"
 import { MockDatabaseService } from "./MockDatabaseService.js"
 import { PGLiteQAService } from "./PGLiteQAService.js"
 import type { BusinessInsight, Order, Product, User } from "./Schemas.js"
 
+/**
+ * @since 1.0.0
+ * @category models
+ * @description Service for providing business intelligence features including KPI monitoring, trend analysis, and customer segmentation.
+ */
 export class BusinessIntelligenceService
   extends Effect.Service<BusinessIntelligenceService>()("BusinessIntelligenceService", {
     effect: Effect.gen(function*() {
       const db = yield* MockDatabaseService
       const qaService = yield* PGLiteQAService
 
-      // 1. Automated KPI Monitoring
+      /**
+       * @description Gets the KPI dashboard with metrics, anomalies, and trends
+       * @returns KPI dashboard data including metrics, anomalies, and trends
+       */
       const getKPIDashboard = () =>
         Effect.gen(function*() {
           const [users, orders] = yield* Effect.all([
@@ -67,7 +80,11 @@ export class BusinessIntelligenceService
           }
         })
 
-      // 2. Natural Language Query to Dashboard
+      /**
+       * @description Converts a natural language query to dashboard visualization with insights and recommendations
+       * @param query The natural language query to analyze
+       * @returns Dashboard data, insights, and recommendations based on the query
+       */
       const naturalLanguageToDashboard = (query: string) =>
         Effect.gen(function*() {
           const visualizationType = yield* determineVisualizationType(query).pipe(
@@ -120,7 +137,11 @@ export class BusinessIntelligenceService
           }
         })
 
-      // 3. Predictive Analytics
+      /**
+       * @description Predicts sales trends for a given period
+       * @param period The period to predict trends for (weekly, monthly, quarterly)
+       * @returns Predicted sales trends with confidence and recommendations
+       */
       const predictSalesTrends = (period: "weekly" | "monthly" | "quarterly" = "monthly") =>
         Effect.gen(function*() {
           const orders = yield* db.getOrders()
@@ -145,7 +166,10 @@ export class BusinessIntelligenceService
           }
         })
 
-      // 4. Customer Segmentation
+      /**
+       * @description Segments customers based on RFM analysis (Recency, Frequency, Monetary)
+       * @returns Customer segments with statistics and recommendations
+       */
       const segmentCustomers = () =>
         Effect.gen(function*() {
           const [users, orders] = yield* Effect.all([
@@ -209,7 +233,10 @@ export class BusinessIntelligenceService
           }
         })
 
-      // 5. Business Insights Generation
+      /**
+       * @description Generates comprehensive business insights from multiple data sources
+       * @returns Array of business insights with recommendations and visualizations
+       */
       const generateBusinessInsights = () =>
         Effect.gen(function*() {
           const [dashboard, segments, trends] = yield* Effect.all([
@@ -323,7 +350,11 @@ export class BusinessIntelligenceService
           return insights
         })
 
-      // Helper functions
+      /**
+       * @description Helper function to determine the appropriate visualization type for a query
+       * @param query The query to analyze for visualization type
+       * @returns The appropriate visualization type (bar, line, pie, table, metric)
+       */
       const determineVisualizationType = (query: string) =>
         Effect.gen(function*() {
           const response = yield* qaService.answerQuestion(
@@ -337,6 +368,11 @@ export class BusinessIntelligenceService
           return "table"
         })
 
+      /**
+       * @description Executes an analytical query based on the entities identified in the analysis
+       * @param analysis The analysis object containing entities
+       * @returns The data based on the entities in the analysis
+       */
       const executeAnalyticalQuery = (analysis: { entities?: Array<string> }) =>
         Effect.gen(function*() {
           if (analysis.entities?.includes("order")) {
@@ -352,6 +388,12 @@ export class BusinessIntelligenceService
           return yield* db.getOrders()
         })
 
+      /**
+       * @description Generates data insights from the provided data and original query
+       * @param data The data to analyze
+       * @param originalQuery The original query that triggered the analysis
+       * @returns Insights generated from the data and query
+       */
       const generateDataInsights = (data: Array<User> | Array<Order> | Array<Product>, originalQuery: string) =>
         qaService.answerQuestion(
           `Analyze this business data and provide 3 key insights. Data sample: ${
@@ -366,11 +408,22 @@ export class BusinessIntelligenceService
           )
         )
 
+      /**
+       * @description Generates recommended actions based on the provided insights
+       * @param insights The insights to generate recommendations from
+       * @returns Recommended actions based on the insights
+       */
       const generateRecommendedActions = (insights: string) =>
         qaService.answerQuestion(
           `Based on these insights: ${insights}, suggest 2-3 actionable business recommendations. Return as a simple list.`
         )
 
+      /**
+       * @description Calculates the trend based on historical data and period
+       * @param data The historical data to analyze
+       * @param period The period for trend analysis (weekly, monthly, quarterly)
+       * @returns Trend information including confidence, direction, and forecast
+       */
       const calculateTrend = (
         data: Array<{ amount: number; date: Date }>,
         period: "weekly" | "monthly" | "quarterly"
@@ -401,6 +454,12 @@ export class BusinessIntelligenceService
         }
       }
 
+      /**
+       * @description Gets trend recommendations based on direction and period
+       * @param direction The trend direction (up, down, stable)
+       * @param period The period for recommendations
+       * @returns Recommendations based on the trend
+       */
       const getTrendRecommendation = (direction: string, period: string) => {
         const recommendations = {
           down: `Investigate causes for ${period}ly decline and adjust strategy`,
@@ -411,6 +470,13 @@ export class BusinessIntelligenceService
         return recommendations[direction as keyof typeof recommendations] || "Monitor trends closely"
       }
 
+      /**
+       * @description Calculates the R(F)M segment based on recency, frequency, and monetary values
+       * @param recency The recency score
+       * @param frequency The frequency score
+       * @param monetary The monetary score
+       * @returns The calculated segment (champions, loyal, potential, at-risk)
+       */
       const calculateRFMSegment = (recency: number, frequency: number, monetary: number) => {
         const rScore = recency < 7 * 24 * 60 * 60 * 1000 ? 3 : recency < 30 * 24 * 60 * 60 * 1000 ? 2 : 1
         const fScore = frequency > 5 ? 3 : frequency > 2 ? 2 : 1
@@ -425,6 +491,11 @@ export class BusinessIntelligenceService
         return "at-risk"
       }
 
+      /**
+       * @description Groups customer segments by their segment type
+       * @param segments The customer segments to group
+       * @returns Segments grouped by their segment type
+       */
       const groupBySegment = (
         segments: Array<{
           metrics: {
@@ -468,6 +539,11 @@ export class BusinessIntelligenceService
         >)
       }
 
+      /**
+       * @description Calculates statistics for each segment
+       * @param groupedSegments The segments grouped by type
+       * @returns Statistics for each segment type
+       */
       const calculateSegmentStats = (
         groupedSegments: Record<
           string,
@@ -509,6 +585,11 @@ export class BusinessIntelligenceService
         }>)
       }
 
+      /**
+       * @description Generates recommendations for each segment based on statistics
+       * @param segmentStats Statistical information about the segments
+       * @returns Recommendations for each segment based on the statistics
+       */
       const generateSegmentRecommendations = (
         segmentStats: Record<string, {
           avgOrderValue: number
@@ -523,6 +604,12 @@ export class BusinessIntelligenceService
           }, provide targeted marketing and retention recommendations for each segment.`
         )
 
+      /**
+       * @description Identifies factors influencing a particular trend
+       * @param trend The trend information to analyze
+       * @param orders The orders to analyze for factor identification
+       * @returns Key factors influencing the specified trend
+       */
       const identifyTrendFactors = (trend: {
         confidence: number
         direction: string
@@ -534,16 +621,37 @@ export class BusinessIntelligenceService
           }. Provide 2-3 key factors.`
         )
 
+      /**
+       * @description Analyzes business trends from orders and users
+       * @param orders The orders to analyze
+       * @param users The users to analyze
+       * @returns Analysis of business trends
+       */
       const analyzeBusinessTrends = (orders: Array<Order>, users: Array<User>) =>
         qaService.answerQuestion(
           `Analyze business trends from ${orders.length} orders and ${users.length} users. Identify 3 key patterns in order amounts, customer behavior, and temporal trends.`
         )
 
       return {
+        /**
+         * @description Gets the KPI dashboard with metrics, anomalies, and trends
+         */
         getKPIDashboard,
+        /**
+         * @description Converts a natural language query to dashboard visualization with insights and recommendations
+         */
         naturalLanguageToDashboard,
+        /**
+         * @description Predicts sales trends for a given period
+         */
         predictSalesTrends,
+        /**
+         * @description Segments customers based on RFM analysis (Recency, Frequency, Monetary)
+         */
         segmentCustomers,
+        /**
+         * @description Generates comprehensive business insights from multiple data sources
+         */
         generateBusinessInsights
       }
     })

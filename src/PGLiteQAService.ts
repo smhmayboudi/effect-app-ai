@@ -1,3 +1,8 @@
+/**
+ * @since 1.0.0
+ * @category models
+ */
+
 import { EmbeddingModel, LanguageModel } from "@effect/ai"
 import { encode } from "@toon-format/toon"
 import { Duration, Effect, Schedule } from "effect"
@@ -13,8 +18,16 @@ import {
   type User
 } from "./Schemas.js"
 
+/**
+ * @since 1.0.0
+ * @category models
+ * @description Service for performing question-answering using semantic search and vector operations.
+ */
 export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQAService", {
   effect: Effect.gen(function*() {
+    /**
+     * @description Type representing structured data for users, orders, and products
+     */
     type StructuredData = {
       users?: Array<User> | undefined
       orders?: Array<Order> | undefined
@@ -26,6 +39,11 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
     const languageModel = yield* LanguageModel.LanguageModel
     const embeddingModel = yield* EmbeddingModel.EmbeddingModel
 
+    /**
+     * @description Infer the entity type (user, order, product) from a question
+     * @param question The question to analyze
+     * @returns The entity type if found, otherwise undefined
+     */
     const inferEntityType = (question: string): string | undefined => {
       const lowerQuestion = question.toLowerCase()
       if (lowerQuestion.includes("user") || lowerQuestion.includes("customer")) return "user"
@@ -34,6 +52,12 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
       return undefined
     }
 
+    /**
+     * @description Fetch structured data (users, orders, products) based on question and entity IDs
+     * @param question The question being asked
+     * @param entityIds The IDs of entities to filter by
+     * @returns Structured data based on the question and entity IDs
+     */
     const fetchStructuredData = (question: string, entityIds: Array<string>) =>
       Effect.gen(function*() {
         // Filter by specific entity IDs
@@ -112,6 +136,13 @@ export class PGLiteQAService extends Effect.Service<PGLiteQAService>()("PGLiteQA
         })
       })
 
+    /**
+     * @description Generate an answer to a question using semantic context and structured data
+     * @param question The question to answer
+     * @param context The semantic context retrieved from vector search
+     * @param structuredData The structured data from the database
+     * @returns The generated answer text
+     */
     const generateAnswer = (
       question: string,
       context: ReadonlyArray<EmbeddingOutput>,
@@ -153,6 +184,11 @@ Question: ${question}`
         return response.text
       })
 
+    /**
+     * @description Generate multiple variations of a question to improve search results
+     * @param question The original question to generate variations for
+     * @returns An array containing the original question and its variations
+     */
     const generateQueryVariations = (question: string) =>
       Effect.gen(function*() {
         const response = yield* languageModel.generateText({
@@ -181,6 +217,11 @@ Question: ${question}
         })
       })
 
+    /**
+     * @description Generate advanced product recommendations based on customer's order history
+     * @param customer_id The ID of the customer to generate recommendations for
+     * @returns A list of recommended items based on user's preference profile
+     */
     const advancedRecommendations = (customer_id: number) =>
       Effect.gen(function*() {
         // Get user's recent orders
@@ -246,6 +287,11 @@ Question: ${question}
         return allRecommendations
       })
 
+    /**
+     * @description Answer a question using semantic search and structured data
+     * @param question The question to answer
+     * @returns The answer to the question
+     */
     const answerQuestion = (question: string) =>
       Effect.gen(function*() {
         yield* Effect.logDebug(`Processing question: ${question}`)
@@ -309,7 +355,11 @@ Question: ${question}
         return answer
       })
 
-    // Enhanced semantic search with query expansion
+    /**
+     * @description Perform enhanced semantic search with query expansion to improve search results
+     * @param question The question to search for
+     * @returns The search results with improved relevance
+     */
     const enhancedSemanticSearch = (question: string) =>
       Effect.gen(function*() {
         // Generate multiple query variations for better search
@@ -359,7 +409,11 @@ Question: ${question}
         return uniqueResults
       })
 
-    // Additional utility methods
+    /**
+     * @description Analyze a question to determine the entities, filters, and expected answer type
+     * @param question The question to analyze
+     * @returns Analysis of the question including entities, filters, and expected answer type
+     */
     const getQuestionAnalysis = (question: string) =>
       Effect.gen(function*() {
         const response = yield* languageModel.generateText({
@@ -390,7 +444,10 @@ Question: ${question}`
         })
       })
 
-    // Data synchronization with real embeddings
+    /**
+     * @description Synchronize data from database to vector store with embeddings
+     * @returns The count of synchronized users, orders, and products
+     */
     const syncDataToVectorStore = () =>
       Effect.gen(function*() {
         yield* Effect.logDebug("Starting data synchronization to vector store")
@@ -506,10 +563,25 @@ Question: ${question}`
       })
 
     return {
+      /**
+       * @description Generate advanced product recommendations based on customer's order history
+       */
       advancedRecommendations,
+      /**
+       * @description Answer a question using semantic search and structured data
+       */
       answerQuestion,
+      /**
+       * @description Perform enhanced semantic search with query expansion to improve search results
+       */
       enhancedSemanticSearch,
+      /**
+       * @description Analyze a question to determine the entities, filters, and expected answer type
+       */
       getQuestionAnalysis,
+      /**
+       * @description Synchronize data from database to vector store with embeddings
+       */
       syncDataToVectorStore
     }
   })
